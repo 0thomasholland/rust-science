@@ -1,52 +1,52 @@
+// TESTS //
 mod grid;
+mod materials;
+mod simulation;
+mod wavefield;
+
 use grid::Grid;
-
-// struct Simulation {
-//     grid: Grid,
-//     materials: MaterialProperties,
-//     wavefield_current: Wavefield,
-//     wavefield_old: Wavefield, // For time-stepping
-//     params: SimulationParams,
-//     current_time_step: usize,
-// }
-
-// impl Simulation {
-//     // Constructor
-//     // new(grid, materials, params) -> Self
-//     // Initialize both wavefields to zero
-
-//     // Method: Get current simulation time
-//     // current_time(&self) -> f64
-
-//     // Method: Swap wavefields (current becomes old, prepare for new current)
-//     // swap_wavefields(&mut self)
-
-//     // Placeholder for now - we'll implement these next:
-//     // step(&mut self)  // Advance one time step
-//     // run(&mut self)   // Main loop
-//     // apply_source(&mut self)  // Add source term
-// }
+use materials::MaterialProperties;
+use ndarray::Array2;
+use simulation::{Simulation, SimulationParams, Source};
+use wavefield::Wavefield;
 
 fn main() {
-    let grid = Grid::new(100, 100, 10.0, 10.0);
+    // Define grid
+    let nx = 200;
+    let nz = 200;
+    let dx = 1.0; // meters
+    let dz = 1.0;
 
-    println!("Grid dimensions: {} x {}", grid.nx, grid.nz);
-    println!("Grid spacing: {} m x {} m", grid.dx, grid.dz);
-    println!("Domain size: {} m x {} m", grid.width(), grid.height());
+    let grid = Grid::new(nx, nz, dx, dz);
 
-    // Test coordinates
-    println!(
-        "Point (0, 0) is at ({}, {})",
-        grid.x_coord(0),
-        grid.z_coord(0)
-    );
-    println!(
-        "Point (10, 10) is at ({}, {})",
-        grid.x_coord(10),
-        grid.z_coord(10)
-    );
+    // Homogeneous material
+    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
+    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
+    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
 
-    // Test bounds checking
-    println!("(50, 50) in bounds? {}", grid.in_bounds(50, 50));
-    println!("(200, 50) in bounds? {}", grid.in_bounds(200, 50));
+    let materials = MaterialProperties::new(vp, vs, rho);
+    let source = Source::new(nx / 2, nz / 2, 25.0);
+
+    let params = SimulationParams {
+        dt: 0.00008, // We'll calculate proper value later
+        nt: 1000,
+        report_period: 100,
+        sources: vec![source],
+        cfl_safety: 0.5,
+    };
+
+    // Initialize simulation
+    let mut sim = Simulation::new(grid, materials, params);
+
+    // Run just a few steps
+    for step in 0..100 {
+        sim.step();
+        let max_vx = sim
+            .wavefield_current
+            .vx
+            .iter()
+            .cloned()
+            .fold(0.0_f64, f64::max);
+        println!("Step {}: max vx = {:.6e}", step, max_vx);
+    }
 }

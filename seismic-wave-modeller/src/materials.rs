@@ -82,7 +82,23 @@ impl MaterialProperties {
 
     fn average_to_vz(rho: &Array2<f64>) -> Array2<f64> {
         // Average to vz positions (i, k+1/2)
-        // TODO: Similar to average_to_vx but in z direction
+        // Similar to average_to_vx but in z direction
+        let (nx, nz) = rho.dim();
+        let mut result = Array2::<f64>::zeros((nx, nz));
+
+        // For each (i, k):
+        //   If k < nz-1: result[[i,k]] = harmonic_mean(rho[[i,k]], rho[[i,k+1]])
+        //   Else: result[[i,k]] = rho[[i,k]] (boundary case)
+        for i in 0..nx {
+            for k in 0..nz {
+                if k < nz - 1 {
+                    result[[i, k]] = Self::harmonic_mean(rho[[i, k]], rho[[i, k + 1]]);
+                } else {
+                    result[[i, k]] = rho[[i, k]];
+                }
+            }
+        }
+        result
     }
 
     fn average_to_xz(mu: &Array2<f64>) -> Array2<f64> {
@@ -91,13 +107,29 @@ impl MaterialProperties {
         let (nx, nz) = mu.dim();
         let mut result = Array2::<f64>::zeros((nx, nz));
 
-        // TODO: Implement
         // For each (i, k):
         //   If i < nx-1 AND k < nz-1:
         //     Average mu from 4 corners: (i,k), (i+1,k), (i,k+1), (i+1,k+1)
-        //     You can do harmonic mean of 4 values, or arithmetic mean is also okay
+        //     You can do harmonic mean of 4 values
         //   Else: handle boundaries
-
+        for i in 0..nx {
+            for k in 0..nz {
+                if i < nx - 1 && k < nz - 1 {
+                    let m1 = mu[[i, k]];
+                    let m2 = mu[[i + 1, k]];
+                    let m3 = mu[[i, k + 1]];
+                    let m4 = mu[[i + 1, k + 1]];
+                    // Harmonic mean of 4 values
+                    // harmonic mean is associative so we can do pairwise
+                    let hm12 = Self::harmonic_mean(m1, m2);
+                    let hm34 = Self::harmonic_mean(m3, m4);
+                    result[[i, k]] = Self::harmonic_mean(hm12, hm34);
+                } else {
+                    // Boundary case: just take the value at (i,k)
+                    result[[i, k]] = mu[[i, k]];
+                }
+            }
+        }
         result
     }
 }

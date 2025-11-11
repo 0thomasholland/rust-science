@@ -40,14 +40,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
-name = "forward-seismic-wave"
-version = "0.0.0"
-dependencies = [
- "ndarray",
- "rayon",
-]
-
-[[package]]
 name = "matrixmultiply"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -138,4 +130,12 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "seismic-wave-modeller"
+version = "0.0.0"
+dependencies = [
+ "ndarray",
+ "rayon",
 ]

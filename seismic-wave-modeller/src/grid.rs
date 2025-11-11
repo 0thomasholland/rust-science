@@ -7,9 +7,7 @@ pub struct Grid {
 
 impl Grid {
     pub fn new(nx: usize, nz: usize, dx: f64, dz: f64) -> Self {
-        // What should we do here?
-        // Just create and return the Grid?
-        // Should we validate inputs? (check that nx, nz > 0, dx, dz > 0?)
+        // Constructor
         Grid { nx, nz, dx, dz }
     }
     pub fn x_coord(&self, i: usize) -> f64 {
