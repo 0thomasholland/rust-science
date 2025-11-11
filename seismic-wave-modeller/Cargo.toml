@@ -2,5 +2,6 @@
 name = "seismic-wave-modeller"
 edition = "2024"
 [dependencies]
-ndarray = "0.17.1"
+ndarray = { version = "0.17.1", features = ["rayon"] }
+plotters = "0.3.7"
 rayon = "1.11.0"
