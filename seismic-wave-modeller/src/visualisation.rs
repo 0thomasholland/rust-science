@@ -1,6 +1,7 @@
 use ndarray::Array2;
 use plotters::prelude::*;
 use std::path::Path;
+use colorcet::ColorMap;
 
 pub struct WavefieldVisualiser {
     output_dir: String,
@@ -56,13 +57,18 @@ impl WavefieldVisualiser {
             .y_desc("Z (grid points)")
             .draw()?;
 
+        // Build CET colormap once per frame.
+        // Use "cet_l8" which corresponds to CET-L08.
+        let cmap: ColorMap = "cet_l8".parse().expect("Failed to parse 'cet_l8' colormap. Check colorcet version/features.");
+        let cmap_rgb: Vec<[u8; 3]> = cmap.get_rgb_int::<u8>();
+
         // Draw the field as colored rectangles
         for i in 0..nx {
             for k in 0..nz {
                 let value = data[[i, k]];
 
-                // Map value to color (blue-white-red colormap)
-                let color = value_to_color(value, min_val, max_val);
+                // Map value to color using the colorcet colormap
+                let color = value_to_color_from_cmap(value, min_val, max_val, &cmap_rgb);
 
                 chart.draw_series(std::iter::once(Rectangle::new(
                     [(i, k), (i + 1, k + 1)],
@@ -78,25 +84,15 @@ impl WavefieldVisualiser {
     }
 }
 
-fn value_to_color(value: f64, min_val: f64, max_val: f64) -> RGBColor {
-    // Blue-white-red colormap (seismic style)
-    // Negative values -> blue, zero -> white, positive -> red
-
+fn value_to_color_from_cmap(value: f64, min_val: f64, max_val: f64, cmap: &[[u8; 3]]) -> RGBColor {
     let normalized = if max_val > min_val {
         (value - min_val) / (max_val - min_val)
     } else {
         0.5
-    };
-
-    let normalized = normalized.clamp(0.0, 1.0);
-
-    if normalized < 0.5 {
-        // Blue to white
-        let t = normalized * 2.0;
-        RGBColor((255.0 * t) as u8, (255.0 * t) as u8, 255)
-    } else {
-        // White to red
-        let t = (normalized - 0.5) * 2.0;
-        RGBColor(255, (255.0 * (1.0 - t)) as u8, (255.0 * (1.0 - t)) as u8)
     }
+    .clamp(0.0, 1.0);
+
+    let idx = ((normalized * ((cmap.len() - 1) as f64)).round() as usize).min(cmap.len() - 1);
+    let rgb = cmap[idx];
+    RGBColor(rgb[0], rgb[1], rgb[2])
 }
