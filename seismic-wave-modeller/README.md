@@ -1,5 +1,15 @@
 # Seismic wave forward modeller
 
+![An example output](output/3.gif)
+
+## Todos
+
+- Take input files
+- More boundary conditions
+- Command line tools
+
+## Theory
+
 Grid cell layout:
 
 ~~~
@@ -26,7 +36,7 @@ For arrays:
 - `sigma_zz[i][k]` - represents stress at position (i, k) physically
 - `sigma_xz[i][k]` - represents stress at position (i+½, k+½) physically
 
-## Equations
+### Equations
 
 Velocity Updates (from Momentum Equation)
 
@@ -42,7 +52,7 @@ $$\frac{\partial \sigma_{zz}}{\partial t} = \lambda \frac{\partial v_x}{\partial
 
 $$\frac{\partial \sigma_{xz}}{\partial t} = \mu \left[ \frac{\partial v_x}{\partial z} + \frac{\partial v_z}{\partial x} \right]$$
 
-## Discretization
+### Discretization
 
 - Velocities at time n+0.5
 
@@ -50,7 +60,7 @@ $$\frac{\partial \sigma_{xz}}{\partial t} = \mu \left[ \frac{\partial v_x}{\part
 
 - Update velocities to time n+1.5 using stresses at n+1
 
-## Material Properties
+### Material Properties
 
 Store material properties at the same locations as normal stresses (i, k)
 
@@ -58,9 +68,9 @@ Use harmonic averaging for properties at velocity and shear stress locations.
 
 Harmonic mean: 2ab/(a+b)
 
-## Boundary Conditions
+### Boundary Conditions
 
-- Rigid (starting idea)
+- Rigid (starting implementation)
   - Velocities are zero at the edges
   - Causes reflections
 - Damping

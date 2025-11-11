@@ -7,6 +7,7 @@ Current projects are kept in branches.
 ## Projects I am working on
 
 - [Seismic wave equation modeller](seismic-wave-modeller/README.md)
+![Seismic wave model produced by my code](seismic-wave-modeller/output/3.gif)
 
 ## Requirments
 
