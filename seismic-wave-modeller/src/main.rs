@@ -2,6 +2,7 @@
 mod grid;
 mod materials;
 mod simulation;
+mod visualisation;
 mod wavefield;
 
 use grid::Grid;
@@ -12,8 +13,8 @@ use wavefield::Wavefield;
 
 fn main() {
     // Define grid
-    let nx = 200;
-    let nz = 200;
+    let nx = 400;
+    let nz = 400;
     let dx = 1.0; // meters
     let dz = 1.0;
 
@@ -28,8 +29,8 @@ fn main() {
     let source = Source::new(nx / 2, nz / 2, 25.0);
 
     let params = SimulationParams {
-        dt: 0.00008, // We'll calculate proper value later
-        nt: 1000,
+        dt: 0.000008, // We'll calculate proper value later
+        nt: 2000,
         report_period: 100,
         sources: vec![source],
         cfl_safety: 0.5,
@@ -39,14 +40,7 @@ fn main() {
     let mut sim = Simulation::new(grid, materials, params);
 
     // Run just a few steps
-    for step in 0..100 {
-        sim.step();
-        let max_vx = sim
-            .wavefield_current
-            .vx
-            .iter()
-            .cloned()
-            .fold(0.0_f64, f64::max);
-        println!("Step {}: max vx = {:.6e}", step, max_vx);
-    }
+    sim.run_with_visualisation(10, "vmag");
+
+    // "ffmpeg -framerate 30 -pattern_type glob -i 'output/2/vmag_*.png' -c:v libx264 -pix_fmt yuv420p output/2.mp4");
 }

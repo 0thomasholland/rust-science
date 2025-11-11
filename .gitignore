@@ -21,4 +21,4 @@ target
 #.idea/
 
 # Ignore any subdictories within output directory
-output/**/**
+**/output/**/

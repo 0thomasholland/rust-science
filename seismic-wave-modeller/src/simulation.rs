@@ -1,6 +1,9 @@
 use crate::grid::Grid;
 use crate::materials::MaterialProperties;
+use crate::visualisation::WavefieldVisualiser;
 use crate::wavefield::Wavefield;
+use ndarray::Zip;
+use rayon::prelude::*;
 use std::f64::consts::PI;
 
 #[derive(Clone, Debug)]
@@ -385,6 +388,23 @@ impl Simulation {
         self.apply_sources();
 
         // 2. Update stresses from velocity gradients
+        self.update_stresses_parallel();
+
+        // 3. Update velocities from stress gradients
+        self.update_velocities_parallel();
+
+        // 4. Apply boundary conditions
+        self.apply_boundary_conditions();
+
+        // 5. Increment timestep
+        self.current_timestep += 1;
+    }
+
+    pub fn step_serial(&mut self) {
+        // 1. Apply sources (inject energy)
+        self.apply_sources();
+
+        // 2. Update stresses from velocity gradients
         self.update_stresses();
 
         // 3. Update velocities from stress gradients
@@ -395,5 +415,198 @@ impl Simulation {
 
         // 5. Increment timestep
         self.current_timestep += 1;
+    }
+
+    pub fn run_with_visualisation(
+        &mut self,
+        visualise_interval: usize,
+        field: &str, // "vx", "vz", "vmag", "divergence", "curl"
+    ) {
+        println!("Starting simulation with visualisation...");
+        println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
+        println!("Time step: {:.6} s", self.params.dt);
+        println!("Total time: {:.3} s", self.params.total_time());
+        println!("Visualising '{}' every {} steps", field, visualise_interval);
+
+        // Create visualiser
+        let visualiser = WavefieldVisualiser::new("output", 1200, 1000);
+
+        // Save initial state
+        self.visualise_field(&visualiser, field);
+
+        while !self.is_finished() {
+            self.step();
+
+            // Visualise
+            if self.current_timestep % visualise_interval == 0 {
+                self.visualise_field(&visualiser, field);
+            }
+
+            // Print progress
+            if self.current_timestep % 100 == 0 {
+                println!(
+                    "Step {}/{} (t={:.4}s)",
+                    self.current_timestep,
+                    self.params.nt,
+                    self.current_time()
+                );
+            }
+        }
+
+        println!("Simulation complete!");
+        println!("Frames saved to output/ directory");
+    }
+
+    fn visualise_field(&self, visualiser: &WavefieldVisualiser, field: &str) {
+        let data = match field {
+            "vx" => self.wavefield_current.vx.clone(),
+            "vz" => self.wavefield_current.vz.clone(),
+            "vmag" => self.wavefield_current.compute_velocity_magnitude(),
+            "divergence" => self
+                .wavefield_current
+                .compute_divergence(self.grid.dx, self.grid.dz),
+            "curl" => self
+                .wavefield_current
+                .compute_curl(self.grid.dx, self.grid.dz),
+            "sigma_xx" => self.wavefield_current.sigma_xx.clone(),
+            "sigma_zz" => self.wavefield_current.sigma_zz.clone(),
+            "sigma_xz" => self.wavefield_current.sigma_xz.clone(),
+            _ => panic!("Unknown field: {}", field),
+        };
+
+        if let Err(e) =
+            visualiser.plot_field(&data, self.current_timestep, field, self.current_time())
+        {
+            eprintln!("Warning: Failed to visualise: {}", e);
+        }
+    }
+
+    fn update_stresses_parallel(&mut self) {
+        let dx = self.grid.dx;
+        let dz = self.grid.dz;
+        let dt = self.params.dt;
+        let nx = self.grid.nx;
+        let nz = self.grid.nz;
+
+        // For each row, process in parallel
+        // This gives us good parallelization while maintaining safe access
+
+        // Process normal stresses
+        let indices: Vec<(usize, usize)> = (1..nx - 1)
+            .flat_map(|i| (1..nz - 1).map(move |k| (i, k)))
+            .collect();
+
+        let updates: Vec<(usize, usize, f64, f64)> = indices
+            .par_iter()
+            .map(|&(i, k)| {
+                let lambda = self.materials.lambda[[i, k]];
+                let mu = self.materials.mu[[i, k]];
+                let lambda_plus_2mu = lambda + 2.0 * mu;
+
+                // Compute velocity derivatives
+                let dvx_dx = (self.wavefield_current.vx[[i, k]]
+                    - self.wavefield_current.vx[[i - 1, k]])
+                    / dx;
+                let dvz_dz = (self.wavefield_current.vz[[i, k]]
+                    - self.wavefield_current.vz[[i, k - 1]])
+                    / dz;
+
+                let dsigma_xx = dt * (lambda_plus_2mu * dvx_dx + lambda * dvz_dz);
+                let dsigma_zz = dt * (lambda * dvx_dx + lambda_plus_2mu * dvz_dz);
+
+                (i, k, dsigma_xx, dsigma_zz)
+            })
+            .collect();
+
+        // Apply updates
+        for (i, k, dsigma_xx, dsigma_zz) in updates {
+            self.wavefield_current.sigma_xx[[i, k]] += dsigma_xx;
+            self.wavefield_current.sigma_zz[[i, k]] += dsigma_zz;
+        }
+
+        // Update shear stress (sigma_xz)
+        let indices_xz: Vec<(usize, usize)> = (0..nx - 1)
+            .flat_map(|i| (0..nz - 1).map(move |k| (i, k)))
+            .collect();
+
+        let updates_xz: Vec<(usize, usize, f64)> = indices_xz
+            .par_iter()
+            .map(|&(i, k)| {
+                let mu = self.materials.mu_xz[[i, k]];
+
+                let dvx_dz = (self.wavefield_current.vx[[i, k + 1]]
+                    - self.wavefield_current.vx[[i, k]])
+                    / dz;
+                let dvz_dx = (self.wavefield_current.vz[[i + 1, k]]
+                    - self.wavefield_current.vz[[i, k]])
+                    / dx;
+
+                let dsigma_xz = dt * mu * (dvx_dz + dvz_dx);
+
+                (i, k, dsigma_xz)
+            })
+            .collect();
+
+        for (i, k, dsigma_xz) in updates_xz {
+            self.wavefield_current.sigma_xz[[i, k]] += dsigma_xz;
+        }
+    }
+
+    fn update_velocities_parallel(&mut self) {
+        let dx = self.grid.dx;
+        let dz = self.grid.dz;
+        let dt = self.params.dt;
+        let nx = self.grid.nx;
+        let nz = self.grid.nz;
+
+        // Update vx
+        let indices: Vec<(usize, usize)> = (1..nx - 1)
+            .flat_map(|i| (1..nz - 1).map(move |k| (i, k)))
+            .collect();
+
+        let updates_vx: Vec<(usize, usize, f64)> = indices
+            .par_iter()
+            .map(|&(i, k)| {
+                let rho = self.materials.rho_vx[[i, k]];
+
+                let dsigma_xx_dx = (self.wavefield_current.sigma_xx[[i + 1, k]]
+                    - self.wavefield_current.sigma_xx[[i, k]])
+                    / dx;
+                let dsigma_xz_dz = (self.wavefield_current.sigma_xz[[i, k]]
+                    - self.wavefield_current.sigma_xz[[i, k - 1]])
+                    / dz;
+
+                let dvx = dt * (1.0 / rho) * (dsigma_xx_dx + dsigma_xz_dz);
+
+                (i, k, dvx)
+            })
+            .collect();
+
+        for (i, k, dvx) in updates_vx {
+            self.wavefield_current.vx[[i, k]] += dvx;
+        }
+
+        // Update vz
+        let updates_vz: Vec<(usize, usize, f64)> = indices
+            .par_iter()
+            .map(|&(i, k)| {
+                let rho = self.materials.rho_vz[[i, k]];
+
+                let dsigma_xz_dx = (self.wavefield_current.sigma_xz[[i, k]]
+                    - self.wavefield_current.sigma_xz[[i - 1, k]])
+                    / dx;
+                let dsigma_zz_dz = (self.wavefield_current.sigma_zz[[i, k + 1]]
+                    - self.wavefield_current.sigma_zz[[i, k]])
+                    / dz;
+
+                let dvz = dt * (1.0 / rho) * (dsigma_xz_dx + dsigma_zz_dz);
+
+                (i, k, dvz)
+            })
+            .collect();
+
+        for (i, k, dvz) in updates_vz {
+            self.wavefield_current.vz[[i, k]] += dvz;
+        }
     }
 }
