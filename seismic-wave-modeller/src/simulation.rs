@@ -8,28 +8,48 @@ use std::f64::consts::PI;
 
 #[derive(Clone, Debug)]
 pub struct Source {
-    pub i: usize, // Grid position x
-    pub k: usize, // Grid position z
-    pub f0: f64,  // Peak frequency (Hz)
-    pub t0: f64,  // Time delay (s)
+    pub x: usize,
+    pub z: usize,
+    pub amplitude: f64,
+    pub frequency: f64,
+    triggered: bool,           // Add this
+    trigger_time: Option<f64>, // Add this - when to trigger (in seconds)
 }
 
 impl Source {
-    pub fn new(i: usize, k: usize, f0: f64) -> Self {
-        // Auto-calculate t0 from f0
-        let t0 = 1.2 / f0;
-        Self { i, k, f0, t0 }
+    pub fn new(x: usize, z: usize, amplitude: f64, frequency: f64) -> Self {
+        Self {
+            x,
+            z,
+            amplitude,
+            frequency,
+            triggered: false,
+            trigger_time: Some(0.0), // Trigger immediately by default
+        }
     }
 
-    pub fn with_delay(i: usize, k: usize, f0: f64, t0: f64) -> Self {
-        // If you want to manually specify t0
-        Self { i, k, f0, t0 }
+    pub fn with_delay(x: usize, z: usize, amplitude: f64, frequency: f64, delay: f64) -> Self {
+        Self {
+            x,
+            z,
+            amplitude,
+            frequency,
+            triggered: false,
+            trigger_time: Some(delay),
+        }
     }
 
+    pub fn should_trigger(&self, current_time: f64) -> bool {
+        !self.triggered && self.trigger_time.map_or(false, |t| current_time >= t)
+    }
+
+    pub fn mark_triggered(&mut self) {
+        self.triggered = true;
+    }
     pub fn ricker_wavelet(&self, t: f64) -> f64 {
         // Ricker wavelet for this source
-        let tau = t - self.t0;
-        let arg = (PI * self.f0 * tau).powi(2);
+        let tau = t - self.trigger_time.unwrap_or(0.0);
+        let arg = (PI * self.frequency * tau).powi(2);
         (1.0 - 2.0 * arg) * (-arg).exp()
     }
 }
@@ -52,6 +72,7 @@ impl SimulationParams {
         source_i: usize,
         source_k: usize,
         source_f0: f64,
+        amplitude: f64,
         cfl_safety: f64,
     ) -> Self {
         // Calculate appropriate t0 from f0
@@ -62,7 +83,9 @@ impl SimulationParams {
             dt,
             nt,
             report_period,
-            sources: vec![Source::with_delay(source_i, source_k, source_f0, source_t0)],
+            sources: vec![Source::with_delay(
+                source_i, source_k, source_f0, amplitude, source_t0,
+            )],
             cfl_safety,
         }
     }
@@ -115,10 +138,15 @@ impl Simulation {
             );
         }
         for (idx, source) in params.sources.iter().enumerate() {
-            if source.i >= grid.nx || source.k >= grid.nz {
+            if source.x >= grid.nx || source.z >= grid.nz {
+                // Changed from i,k to x,z
                 panic!(
                     "Source {} at ({}, {}) is outside grid bounds ({}, {})",
-                    idx, source.i, source.k, grid.nx, grid.nz
+                    idx,
+                    source.x,
+                    source.z,
+                    grid.nx,
+                    grid.nz // Changed from i,k to x,z
                 );
             }
         }
@@ -317,25 +345,29 @@ impl Simulation {
     fn apply_sources(&mut self) {
         let t = self.current_time();
 
-        for source in &self.params.sources {
-            // Get wavelet amplitude at current time
+        for source in &mut self.params.sources {
+            if source.should_trigger(t) {
+                source.mark_triggered();
+            }
+
+            if !source.triggered {
+                continue;
+            }
+
+            let tau = t - source.trigger_time.unwrap_or(0.0);
+
+            // Only apply for ~3 periods of the dominant frequency
+            let pulse_duration = 3.0 / source.frequency;
+            if tau > pulse_duration {
+                continue; // Stop applying after pulse is complete
+            }
+
             let amplitude = source.ricker_wavelet(t);
+            let scale = self.grid.dx * self.grid.dz;
+            let scaled_amplitude = amplitude * scale * source.amplitude;
 
-            // Apply as explosion source (isotropic expansion)
-            // Add to normal stresses at source location
-            // self.wavefield_current.sigma_xx[[source.i, source.k]] += amplitude;
-            // self.wavefield_current.sigma_zz[[source.i, source.k]] += amplitude;
-            // Note: We're adding directly to stress, not using +=
-            // The amplitude needs to be scaled properly
-            // A common scaling is: amplitude * (lambda + 2*mu)
-            // This gives a physically meaningful force
-
-            let lambda = self.materials.lambda[[source.i, source.k]];
-            let mu = self.materials.mu[[source.i, source.k]];
-            let scale = lambda + 2.0 * mu;
-            let scaled_amplitude = amplitude * scale;
-            self.wavefield_current.sigma_xx[[source.i, source.k]] += scaled_amplitude;
-            self.wavefield_current.sigma_zz[[source.i, source.k]] += scaled_amplitude;
+            self.wavefield_current.sigma_xx[[source.x, source.z]] += scaled_amplitude;
+            self.wavefield_current.sigma_zz[[source.x, source.z]] += scaled_amplitude;
         }
     }
 
@@ -384,8 +416,21 @@ impl Simulation {
     }
 
     pub fn step(&mut self) {
-        // 1. Apply sources (inject energy)
-        self.apply_sources();
+        let current_time = self.current_time();
+
+        // 1. Apply sources (inject energy) - only for sources that should trigger
+        let should_apply = self.params.sources.iter_mut().any(|source| {
+            if source.should_trigger(current_time) {
+                source.mark_triggered();
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_apply {
+            self.apply_sources();
+        }
 
         // 2. Update stresses from velocity gradients
         self.update_stresses_parallel();
@@ -401,8 +446,21 @@ impl Simulation {
     }
 
     pub fn step_serial(&mut self) {
-        // 1. Apply sources (inject energy)
-        self.apply_sources();
+        let current_time = self.current_time();
+
+        // 1. Apply sources (inject energy) - only for sources that should trigger
+        let should_apply = self.params.sources.iter_mut().any(|source| {
+            if source.should_trigger(current_time) {
+                source.mark_triggered();
+                true
+            } else {
+                false
+            }
+        });
+
+        if should_apply {
+            self.apply_sources();
+        }
 
         // 2. Update stresses from velocity gradients
         self.update_stresses();
@@ -421,15 +479,17 @@ impl Simulation {
         &mut self,
         visualise_interval: usize,
         field: &str, // "vx", "vz", "vmag", "divergence", "curl"
+        iteration: i64,
     ) {
         println!("Starting simulation with visualisation...");
         println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
         println!("Time step: {:.6} s", self.params.dt);
         println!("Total time: {:.3} s", self.params.total_time());
         println!("Visualising '{}' every {} steps", field, visualise_interval);
-
+        let output_directory = vec!["output".to_string(), iteration.to_string()].join("/");
         // Create visualiser
-        let visualiser = WavefieldVisualiser::new("output", 1200, 1000);
+        let visualiser =
+            WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
 
         // Save initial state
         self.visualise_field(&visualiser, field);
@@ -479,6 +539,69 @@ impl Simulation {
         {
             eprintln!("Warning: Failed to visualise: {}", e);
         }
+    }
+    pub fn run_with_p_s_visualisation(&mut self, visualise_interval: usize, iteration: i64) {
+        println!("Starting simulation with P-S wave visualisation...");
+        println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
+        println!("Time step: {:.6} s", self.params.dt);
+        println!("Total time: {:.3} s", self.params.total_time());
+        println!(
+            "Visualising P and S waves every {} steps",
+            visualise_interval
+        );
+
+        let output_directory = format!("output/{}", iteration);
+
+        // Create visualiser
+        let visualiser =
+            WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
+
+        // Save initial state
+        let divergence = self
+            .wavefield_current
+            .compute_divergence(self.grid.dx, self.grid.dz);
+        let curl = self
+            .wavefield_current
+            .compute_curl(self.grid.dx, self.grid.dz);
+        visualiser
+            .plot_p_and_s_overlay(&divergence, &curl, 0, 0.0)
+            .unwrap();
+
+        while !self.is_finished() {
+            self.step();
+
+            // Visualise
+            if self.current_timestep % visualise_interval == 0 {
+                let divergence = self
+                    .wavefield_current
+                    .compute_divergence(self.grid.dx, self.grid.dz);
+                let curl = self
+                    .wavefield_current
+                    .compute_curl(self.grid.dx, self.grid.dz);
+
+                if let Err(e) = visualiser.plot_p_and_s_overlay(
+                    &divergence,
+                    &curl,
+                    self.current_timestep / visualise_interval,
+                    self.current_time(),
+                ) {
+                    eprintln!("Warning: Failed to visualise: {}", e);
+                }
+            }
+
+            // Print progress
+            if self.current_timestep % 100 == 0 {
+                println!(
+                    "Step {}/{} (t={:.4}s)",
+                    self.current_timestep,
+                    self.params.nt,
+                    self.current_time()
+                );
+            }
+        }
+
+        println!("Simulation complete!");
+        println!("P-S overlay frames saved to {}/", output_directory);
     }
 
     fn update_stresses_parallel(&mut self) {
