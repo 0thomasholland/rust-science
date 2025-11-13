@@ -206,14 +206,19 @@ impl Simulation {
         let nx = self.grid.nx;
         let nz = self.grid.nz;
 
+        // Fourth order coefficeients
+
+        let c1 = 1.0 / 12.0;
+        let c2 = 8.0 / 12.0;
+
         // Update sigma_xx and sigma_zz (normal stresses)
         // These live at (i, k) positions
         // Equations:
         // ∂σxx/∂t = (λ + 2μ) × ∂vx/∂x + λ × ∂vz/∂z
         // ∂σzz/∂t = λ × ∂vx/∂x + (λ + 2μ) × ∂vz/∂z
 
-        for i in 1..nx - 1 {
-            for k in 1..nz - 1 {
+        for i in 2..nx - 2 {
+            for k in 2..nz - 2 {
                 // Get material properties at this point
                 let lambda = self.materials.lambda[[i, k]];
                 let mu = self.materials.mu[[i, k]];
@@ -221,25 +226,27 @@ impl Simulation {
 
                 // Compute velocity derivatives using staggered grid
                 // ∂vx/∂x ≈ (vx[i,k] - vx[i-1,k]) / dx
-                let dvx_dx = (self.wavefield_current.vx[[i, k]]
-                    - self.wavefield_current.vx[[i - 1, k]])
+                let dvx_dx = (-c1 * self.wavefield_current.vx[[i + 1, k]]
+                    + c2 * self.wavefield_current.vx[[i, k]]
+                    - c2 * self.wavefield_current.vx[[i - 1, k]]
+                    + c1 * self.wavefield_current.vx[[i - 2, k]])
                     / dx;
 
                 // vz lives at (i, k+1/2), so for σxx at (i,k):
                 // ∂vz/∂z ≈ (vz[i,k] - vz[i,k-1]) / dz
-                let dvz_dz = (self.wavefield_current.vz[[i, k]]
-                    - self.wavefield_current.vz[[i, k - 1]])
+                let dvz_dz = (-c1 * self.wavefield_current.vz[[i, k + 1]]
+                    + c2 * self.wavefield_current.vz[[i, k]]
+                    - c2 * self.wavefield_current.vz[[i, k - 1]]
+                    + c1 * self.wavefield_current.vz[[i, k - 2]])
                     / dz;
 
                 // Update stresses
                 // sigma_xx_new = sigma_xx_old + dt * [(λ+2μ) * dvx_dx + λ * dvz_dz]
                 // sigma_zz_new = sigma_zz_old + dt * [λ * dvx_dx + (λ+2μ) * dvz_dz]
-                let sigma_xx_new = self.wavefield_current.sigma_xx[[i, k]]
-                    + dt * (lambda_plus_2mu * dvx_dx + lambda * dvz_dz);
-                let sigma_zz_new = self.wavefield_current.sigma_zz[[i, k]]
-                    + dt * (lambda * dvx_dx + lambda_plus_2mu * dvz_dz);
-                self.wavefield_current.sigma_xx[[i, k]] = sigma_xx_new;
-                self.wavefield_current.sigma_zz[[i, k]] = sigma_zz_new
+                self.wavefield_current.sigma_xx[[i, k]] +=
+                    dt * (lambda_plus_2mu * dvx_dx + lambda * dvz_dz);
+                self.wavefield_current.sigma_zz[[i, k]] +=
+                    dt * (lambda * dvx_dx + lambda_plus_2mu * dvz_dz);
             }
         }
 
@@ -247,29 +254,26 @@ impl Simulation {
         // This lives at (i+1/2, k+1/2) positions
         // Equation: ∂σxz/∂t = μ × (∂vx/∂z + ∂vz/∂x)
 
-        for i in 0..nx - 1 {
-            for k in 0..nz - 1 {
-                // Get mu at shear stress position (already pre-computed)
+        for i in 1..nx - 2 {
+            // Note: different range for shear
+            for k in 1..nz - 2 {
                 let mu = self.materials.mu_xz[[i, k]];
 
-                // Compute velocity derivatives
-                // vx lives at (i+1/2, k), we need ∂vx/∂z at (i+1/2, k+1/2)
-                // ∂vx/∂z ≈ (vx[i,k+1] - vx[i,k]) / dz
-                let dvx_dz = (self.wavefield_current.vx[[i, k + 1]]
-                    - self.wavefield_current.vx[[i, k]])
+                // Fourth-order ∂vx/∂z at (i+1/2, k+1/2)
+                let dvx_dz = (-c1 * self.wavefield_current.vx[[i, k + 2]]
+                    + c2 * self.wavefield_current.vx[[i, k + 1]]
+                    - c2 * self.wavefield_current.vx[[i, k]]
+                    + c1 * self.wavefield_current.vx[[i, k - 1]])
                     / dz;
 
-                // vz lives at (i, k+1/2), we need ∂vz/∂x at (i+1/2, k+1/2)
-                // ∂vz/∂x ≈ (vz[i+1,k] - vz[i,k]) / dx
-                let dvz_dx = (self.wavefield_current.vz[[i + 1, k]]
-                    - self.wavefield_current.vz[[i, k]])
+                // Fourth-order ∂vz/∂x at (i+1/2, k+1/2)
+                let dvz_dx = (-c1 * self.wavefield_current.vz[[i + 2, k]]
+                    + c2 * self.wavefield_current.vz[[i + 1, k]]
+                    - c2 * self.wavefield_current.vz[[i, k]]
+                    + c1 * self.wavefield_current.vz[[i - 1, k]])
                     / dx;
 
-                // Update shear stress
-                // sigma_xz_new = sigma_xz_old + dt * μ * (dvx_dz + dvz_dx)
-                let sigma_xz_new =
-                    self.wavefield_current.sigma_xz[[i, k]] + dt * mu * (dvx_dz + dvz_dx);
-                self.wavefield_current.sigma_xz[[i, k]] = sigma_xz_new;
+                self.wavefield_current.sigma_xz[[i, k]] += dt * mu * (dvx_dz + dvz_dx);
             }
         }
     }
@@ -281,63 +285,54 @@ impl Simulation {
         let nx = self.grid.nx;
         let nz = self.grid.nz;
 
-        // Update vx (horizontal velocity)
-        // Lives at (i+1/2, k) positions
-        // Equation: ∂vx/∂t = (1/ρ) × (∂σxx/∂x + ∂σxz/∂z)
+        let c1 = 1.0 / 12.0;
+        let c2 = 8.0 / 12.0;
 
-        for i in 1..nx - 1 {
-            for k in 1..nz - 1 {
-                // Get density at vx position (pre-computed)
+        // Update vx (horizontal velocity)
+        for i in 2..nx - 2 {
+            for k in 2..nz - 2 {
                 let rho = self.materials.rho_vx[[i, k]];
 
-                // Compute stress derivatives
-                // σxx lives at (i, k), we need ∂σxx/∂x at (i+1/2, k)
-                // ∂σxx/∂x ≈ (σxx[i+1,k] - σxx[i,k]) / dx
-                let dsigma_xx_dx = (self.wavefield_current.sigma_xx[[i + 1, k]]
-                    - self.wavefield_current.sigma_xx[[i, k]])
+                // Fourth-order ∂σxx/∂x at (i+1/2, k)
+                let dsigma_xx_dx = (-c1 * self.wavefield_current.sigma_xx[[i + 2, k]]
+                    + c2 * self.wavefield_current.sigma_xx[[i + 1, k]]
+                    - c2 * self.wavefield_current.sigma_xx[[i, k]]
+                    + c1 * self.wavefield_current.sigma_xx[[i - 1, k]])
                     / dx;
 
-                // σxz lives at (i+1/2, k+1/2), we need ∂σxz/∂z at (i+1/2, k)
-                // ∂σxz/∂z ≈ (σxz[i,k] - σxz[i,k-1]) / dz
-                let dsigma_xz_dz = (self.wavefield_current.sigma_xz[[i, k]]
-                    - self.wavefield_current.sigma_xz[[i, k - 1]])
+                // Fourth-order ∂σxz/∂z at (i+1/2, k)
+                let dsigma_xz_dz = (-c1 * self.wavefield_current.sigma_xz[[i, k + 1]]
+                    + c2 * self.wavefield_current.sigma_xz[[i, k]]
+                    - c2 * self.wavefield_current.sigma_xz[[i, k - 1]]
+                    + c1 * self.wavefield_current.sigma_xz[[i, k - 2]])
                     / dz;
 
-                // Update velocity
-                // vx_new = vx_old + dt * (1/ρ) * (dsigma_xx_dx + dsigma_xz_dz)
-                let vx_new = self.wavefield_current.vx[[i, k]]
-                    + dt * (1.0 / rho) * (dsigma_xx_dx + dsigma_xz_dz);
-                self.wavefield_current.vx[[i, k]] = vx_new;
+                self.wavefield_current.vx[[i, k]] +=
+                    dt * (1.0 / rho) * (dsigma_xx_dx + dsigma_xz_dz);
             }
         }
 
         // Update vz (vertical velocity)
-        // Lives at (i, k+1/2) positions
-        // Equation: ∂vz/∂t = (1/ρ) × (∂σxz/∂x + ∂σzz/∂z)
-
-        for i in 1..nx - 1 {
-            for k in 1..nz - 1 {
-                // Get density at vz position (pre-computed)
+        for i in 2..nx - 2 {
+            for k in 2..nz - 2 {
                 let rho = self.materials.rho_vz[[i, k]];
 
-                // Compute stress derivatives
-                // σxz lives at (i+1/2, k+1/2), we need ∂σxz/∂x at (i, k+1/2)
-                // ∂σxz/∂x ≈ (σxz[i,k] - σxz[i-1,k]) / dx
-                let dsigma_xz_dx = (self.wavefield_current.sigma_xz[[i, k]]
-                    - self.wavefield_current.sigma_xz[[i - 1, k]])
+                // Fourth-order ∂σxz/∂x at (i, k+1/2)
+                let dsigma_xz_dx = (-c1 * self.wavefield_current.sigma_xz[[i + 1, k]]
+                    + c2 * self.wavefield_current.sigma_xz[[i, k]]
+                    - c2 * self.wavefield_current.sigma_xz[[i - 1, k]]
+                    + c1 * self.wavefield_current.sigma_xz[[i - 2, k]])
                     / dx;
 
-                // σzz lives at (i, k), we need ∂σzz/∂z at (i, k+1/2)
-                // ∂σzz/∂z ≈ (σzz[i,k+1] - σzz[i,k]) / dz
-                let dsigma_zz_dz = (self.wavefield_current.sigma_zz[[i, k + 1]]
-                    - self.wavefield_current.sigma_zz[[i, k]])
+                // Fourth-order ∂σzz/∂z at (i, k+1/2)
+                let dsigma_zz_dz = (-c1 * self.wavefield_current.sigma_zz[[i, k + 2]]
+                    + c2 * self.wavefield_current.sigma_zz[[i, k + 1]]
+                    - c2 * self.wavefield_current.sigma_zz[[i, k]]
+                    + c1 * self.wavefield_current.sigma_zz[[i, k - 1]])
                     / dz;
 
-                // Update velocity
-                // vz_new = vz_old + dt * (1/ρ) * (dsigma_xz_dx + dsigma_zz_dz)
-                let vz_new = self.wavefield_current.vz[[i, k]]
-                    + dt * (1.0 / rho) * (dsigma_xz_dx + dsigma_zz_dz);
-                self.wavefield_current.vz[[i, k]] = vz_new;
+                self.wavefield_current.vz[[i, k]] +=
+                    dt * (1.0 / rho) * (dsigma_xz_dx + dsigma_zz_dz);
             }
         }
     }
@@ -357,7 +352,7 @@ impl Simulation {
             let tau = t - source.trigger_time.unwrap_or(0.0);
 
             // Only apply for ~3 periods of the dominant frequency
-            let pulse_duration = 3.0 / source.frequency;
+            let pulse_duration = 1.5 / source.frequency;
             if tau > pulse_duration {
                 continue; // Stop applying after pulse is complete
             }
@@ -376,22 +371,32 @@ impl Simulation {
         let nz = self.grid.nz;
 
         // Rigid boundaries: set velocities to zero at edges
-        // This is simple but causes reflections
+        // Now we need to handle 2 layers on each side
 
-        // Left and right boundaries
+        // Left and right boundaries (2 layers each)
         for k in 0..nz {
             self.wavefield_current.vx[[0, k]] = 0.0;
+            self.wavefield_current.vx[[1, k]] = 0.0;
             self.wavefield_current.vx[[nx - 1, k]] = 0.0;
+            self.wavefield_current.vx[[nx - 2, k]] = 0.0;
+
             self.wavefield_current.vz[[0, k]] = 0.0;
+            self.wavefield_current.vz[[1, k]] = 0.0;
             self.wavefield_current.vz[[nx - 1, k]] = 0.0;
+            self.wavefield_current.vz[[nx - 2, k]] = 0.0;
         }
 
-        // Top and bottom boundaries
+        // Top and bottom boundaries (2 layers each)
         for i in 0..nx {
             self.wavefield_current.vx[[i, 0]] = 0.0;
+            self.wavefield_current.vx[[i, 1]] = 0.0;
             self.wavefield_current.vx[[i, nz - 1]] = 0.0;
+            self.wavefield_current.vx[[i, nz - 2]] = 0.0;
+
             self.wavefield_current.vz[[i, 0]] = 0.0;
+            self.wavefield_current.vz[[i, 1]] = 0.0;
             self.wavefield_current.vz[[i, nz - 1]] = 0.0;
+            self.wavefield_current.vz[[i, nz - 2]] = 0.0;
         }
     }
 

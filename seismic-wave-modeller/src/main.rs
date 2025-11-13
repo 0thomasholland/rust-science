@@ -51,7 +51,7 @@ fn run() {
     // Initialize simulation
     let mut sim = Simulation::new(grid, materials, params);
     let step_rate = (((length / dt) as f64 / (video_length * fps)) as f64).round() as usize; // 30 FPS type rounded then as usize
-    sim.run_with_visualisation(step_rate, "vmag", 9);
+    sim.run_with_visualisation(step_rate, "vmag", 10);
 }
 
 fn safe_dt() {
@@ -92,36 +92,4 @@ fn safe_dt() {
 fn main() {
     run();
     // safe_dt();
-}
-
-fn safe_params() {
-    //calcualtes safe simulation parameters
-    let nx = 100;
-    let nz = 100;
-    let dx = 0.1; // meters
-    let dz = 0.1;
-
-    let grid = Grid::new(nx, nz, dx, dz);
-
-    // Homogeneous material
-    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
-    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
-    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
-
-    let materials = MaterialProperties::new(vp, vs, rho);
-
-    let cfl_safety = 0.5;
-    let parameters = SimulationParams {
-        dt: 0.0, // Placeholder
-        nt: 1000,
-        report_period: 100,
-        sources: vec![],
-        cfl_safety,
-    };
-    let dt = parameters.compute_stable_dt(dx, dz, 6000.0); // Using max velocity
-    println!("Calculated stable timestep: {} seconds", dt);
-}
-
-fn main() {
-    run();
 }
