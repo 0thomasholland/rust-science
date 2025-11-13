@@ -15,10 +15,12 @@ Fedora:
 
 ~~~
 sudo dnf install fontconfig-devel
+sudo dnf install hdf5-devel
 ~~~
 
 Debian/Ubuntu:
 
 ~~~
 sudo apt install libfontconfig1-dev
+sudo dnf install hdf5-devel
 ~~~

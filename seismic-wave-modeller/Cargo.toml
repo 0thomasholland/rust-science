@@ -3,6 +3,7 @@ name = "seismic-wave-modeller"
 edition = "2024"
 [dependencies]
 colorgrad = { version = "0.8.0", features = ["preset"] }
+hdf5 = { package = "hdf5-metno", version = "0.10.0" }
 ndarray = { version = "0.17.1", features = ["rayon"] }
 plotters = "0.3.7"
 rayon = "1.11.0"

@@ -1,6 +1,7 @@
 use crate::grid::Grid;
+use crate::hdf5_writer::HDF5Writer;
 use crate::materials::MaterialProperties;
-use crate::visualisation::WavefieldVisualiser;
+// use crate::visualisation::WavefieldVisualiser;
 use crate::wavefield::Wavefield;
 use ndarray::Zip;
 use rayon::prelude::*;
@@ -89,6 +90,21 @@ impl SimulationParams {
             cfl_safety,
         }
     }
+    pub fn new_multi_source(
+        dt: f64,
+        nt: usize,
+        report_period: usize,
+        sources: Vec<Source>,
+        cfl_safety: f64,
+    ) -> Self {
+        Self {
+            dt,
+            nt,
+            report_period,
+            sources,
+            cfl_safety,
+        }
+    }
 
     pub fn total_time(&self) -> f64 {
         // Total simulation time from number of time steps and time step size
@@ -114,6 +130,9 @@ impl SimulationParams {
 
         self.cfl_safety * dx.min(dz) / vp_max
     }
+    pub fn compute_stable_dt_static(dx: f64, dz: f64, vp_max: f64, cfl_safety: f64) -> f64 {
+        cfl_safety * dx.min(dz) / vp_max
+    }
 }
 
 pub struct Simulation {
@@ -122,7 +141,7 @@ pub struct Simulation {
     pub wavefield_current: Wavefield,
     pub wavefield_old: Wavefield,
     pub params: SimulationParams,
-    current_timestep: usize,
+    pub current_timestep: usize,
 }
 
 impl Simulation {
@@ -480,135 +499,6 @@ impl Simulation {
         self.current_timestep += 1;
     }
 
-    pub fn run_with_visualisation(
-        &mut self,
-        visualise_interval: usize,
-        field: &str, // "vx", "vz", "vmag", "divergence", "curl"
-        iteration: i64,
-    ) {
-        println!("Starting simulation with visualisation...");
-        println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
-        println!("Time step: {:.6} s", self.params.dt);
-        println!("Total time: {:.3} s", self.params.total_time());
-        println!("Visualising '{}' every {} steps", field, visualise_interval);
-        let output_directory = vec!["output".to_string(), iteration.to_string()].join("/");
-        // Create visualiser
-        let visualiser =
-            WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
-
-        // Save initial state
-        self.visualise_field(&visualiser, field);
-
-        while !self.is_finished() {
-            self.step();
-
-            // Visualise
-            if self.current_timestep % visualise_interval == 0 {
-                self.visualise_field(&visualiser, field);
-            }
-
-            // Print progress
-            if self.current_timestep % 100 == 0 {
-                println!(
-                    "Step {}/{} (t={:.4}s)",
-                    self.current_timestep,
-                    self.params.nt,
-                    self.current_time()
-                );
-            }
-        }
-
-        println!("Simulation complete!");
-        println!("Frames saved to output/ directory");
-    }
-
-    fn visualise_field(&self, visualiser: &WavefieldVisualiser, field: &str) {
-        let data = match field {
-            "vx" => self.wavefield_current.vx.clone(),
-            "vz" => self.wavefield_current.vz.clone(),
-            "vmag" => self.wavefield_current.compute_velocity_magnitude(),
-            "divergence" => self
-                .wavefield_current
-                .compute_divergence(self.grid.dx, self.grid.dz),
-            "curl" => self
-                .wavefield_current
-                .compute_curl(self.grid.dx, self.grid.dz),
-            "sigma_xx" => self.wavefield_current.sigma_xx.clone(),
-            "sigma_zz" => self.wavefield_current.sigma_zz.clone(),
-            "sigma_xz" => self.wavefield_current.sigma_xz.clone(),
-            _ => panic!("Unknown field: {}", field),
-        };
-
-        if let Err(e) =
-            visualiser.plot_field(&data, self.current_timestep, field, self.current_time())
-        {
-            eprintln!("Warning: Failed to visualise: {}", e);
-        }
-    }
-    pub fn run_with_p_s_visualisation(&mut self, visualise_interval: usize, iteration: i64) {
-        println!("Starting simulation with P-S wave visualisation...");
-        println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
-        println!("Time step: {:.6} s", self.params.dt);
-        println!("Total time: {:.3} s", self.params.total_time());
-        println!(
-            "Visualising P and S waves every {} steps",
-            visualise_interval
-        );
-
-        let output_directory = format!("output/{}", iteration);
-
-        // Create visualiser
-        let visualiser =
-            WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
-
-        // Save initial state
-        let divergence = self
-            .wavefield_current
-            .compute_divergence(self.grid.dx, self.grid.dz);
-        let curl = self
-            .wavefield_current
-            .compute_curl(self.grid.dx, self.grid.dz);
-        visualiser
-            .plot_p_and_s_overlay(&divergence, &curl, 0, 0.0)
-            .unwrap();
-
-        while !self.is_finished() {
-            self.step();
-
-            // Visualise
-            if self.current_timestep % visualise_interval == 0 {
-                let divergence = self
-                    .wavefield_current
-                    .compute_divergence(self.grid.dx, self.grid.dz);
-                let curl = self
-                    .wavefield_current
-                    .compute_curl(self.grid.dx, self.grid.dz);
-
-                if let Err(e) = visualiser.plot_p_and_s_overlay(
-                    &divergence,
-                    &curl,
-                    self.current_timestep / visualise_interval,
-                    self.current_time(),
-                ) {
-                    eprintln!("Warning: Failed to visualise: {}", e);
-                }
-            }
-
-            // Print progress
-            if self.current_timestep % 100 == 0 {
-                println!(
-                    "Step {}/{} (t={:.4}s)",
-                    self.current_timestep,
-                    self.params.nt,
-                    self.current_time()
-                );
-            }
-        }
-
-        println!("Simulation complete!");
-        println!("P-S overlay frames saved to {}/", output_directory);
-    }
-
     fn update_stresses_parallel(&mut self) {
         let dx = self.grid.dx;
         let dz = self.grid.dz;
@@ -736,5 +626,193 @@ impl Simulation {
         for (i, k, dvz) in updates_vz {
             self.wavefield_current.vz[[i, k]] += dvz;
         }
+    }
+
+    // pub fn run_with_visualisation(
+    //     &mut self,
+    //     visualise_interval: usize,
+    //     field: &str, // "vx", "vz", "vmag", "divergence", "curl"
+    //     iteration: i64,
+    // ) {
+    //     println!("Starting simulation with visualisation...");
+    //     println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
+    //     println!("Time step: {:.6} s", self.params.dt);
+    //     println!("Total time: {:.3} s", self.params.total_time());
+    //     println!("Visualising '{}' every {} steps", field, visualise_interval);
+    //     let output_directory = vec!["output".to_string(), iteration.to_string()].join("/");
+    //     // Create visualiser
+    //     let visualiser =
+    //         WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
+
+    //     // Save initial state
+    //     self.visualise_field(&visualiser, field);
+
+    //     while !self.is_finished() {
+    //         self.step();
+
+    //         // Visualise
+    //         if self.current_timestep % visualise_interval == 0 {
+    //             self.visualise_field(&visualiser, field);
+    //         }
+
+    //         // Print progress
+    //         if self.current_timestep % 100 == 0 {
+    //             println!(
+    //                 "Step {}/{} (t={:.4}s)",
+    //                 self.current_timestep,
+    //                 self.params.nt,
+    //                 self.current_time()
+    //             );
+    //         }
+    //     }
+    //
+    //     println!("Simulation complete!");
+    //     println!("Frames saved to output/ directory");
+    // }
+
+    // fn visualise_field(&self, visualiser: &WavefieldVisualiser, field: &str) {
+    //     let data = match field {
+    //         "vx" => self.wavefield_current.vx.clone(),
+    //         "vz" => self.wavefield_current.vz.clone(),
+    //         "vmag" => self.wavefield_current.compute_velocity_magnitude(),
+    //         "divergence" => self
+    //             .wavefield_current
+    //             .compute_divergence(self.grid.dx, self.grid.dz),
+    //         "curl" => self
+    //             .wavefield_current
+    //             .compute_curl(self.grid.dx, self.grid.dz),
+    //         "sigma_xx" => self.wavefield_current.sigma_xx.clone(),
+    //         "sigma_zz" => self.wavefield_current.sigma_zz.clone(),
+    //         "sigma_xz" => self.wavefield_current.sigma_xz.clone(),
+    //         _ => panic!("Unknown field: {}", field),
+    //     };
+
+    //     if let Err(e) =
+    //         visualiser.plot_field(&data, self.current_timestep, field, self.current_time())
+    //     {
+    //         eprintln!("Warning: Failed to visualise: {}", e);
+    //     }
+    // }
+
+    // pub fn run_with_p_s_visualisation(&mut self, visualise_interval: usize, iteration: i64) {
+    //     println!("Starting simulation with P-S wave visualisation...");
+    //     println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
+    //     println!("Time step: {:.6} s", self.params.dt);
+    //     println!("Total time: {:.3} s", self.params.total_time());
+    //     println!(
+    //         "Visualising P and S waves every {} steps",
+    //         visualise_interval
+    //     );
+
+    //     let output_directory = format!("output/{}", iteration);
+
+    //     // Create visualiser
+    //     let visualiser =
+    //         WavefieldVisualiser::new(&output_directory, 1200, 1000, self.grid.dx, self.grid.dz);
+
+    //     // Save initial state
+    //     let divergence = self
+    //         .wavefield_current
+    //         .compute_divergence(self.grid.dx, self.grid.dz);
+    //     let curl = self
+    //         .wavefield_current
+    //         .compute_curl(self.grid.dx, self.grid.dz);
+    //     visualiser
+    //         .plot_p_and_s_overlay(&divergence, &curl, 0, 0.0)
+    //         .unwrap();
+
+    //     while !self.is_finished() {
+    //         self.step();
+
+    //         // Visualise
+    //         if self.current_timestep % visualise_interval == 0 {
+    //             let divergence = self
+    //                 .wavefield_current
+    //                 .compute_divergence(self.grid.dx, self.grid.dz);
+    //             let curl = self
+    //                 .wavefield_current
+    //                 .compute_curl(self.grid.dx, self.grid.dz);
+
+    //             if let Err(e) = visualiser.plot_p_and_s_overlay(
+    //                 &divergence,
+    //                 &curl,
+    //                 self.current_timestep / visualise_interval,
+    //                 self.current_time(),
+    //             ) {
+    //                 eprintln!("Warning: Failed to visualise: {}", e);
+    //             }
+    //         }
+
+    //         // Print progress
+    //         if self.current_timestep % 100 == 0 {
+    //             println!(
+    //                 "Step {}/{} (t={:.4}s)",
+    //                 self.current_timestep,
+    //                 self.params.nt,
+    //                 self.current_time()
+    //             );
+    //         }
+    //     }
+
+    //     println!("Simulation complete!");
+    //     println!("P-S overlay frames saved to {}/", output_directory);
+    // }
+
+    pub fn run_with_hdf5(
+        &mut self,
+        output_file: &str,
+        save_interval: usize,
+        fields: Vec<&str>,
+        report_interval: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Starting simulation with HDF5 output...");
+        println!("Grid: {}x{}", self.grid.nx, self.grid.nz);
+        println!("Time step: {:.6} s", self.params.dt);
+        println!("Total time: {:.3} s", self.params.total_time());
+        println!(
+            "Saving {} fields every {} steps to {}",
+            fields.len(),
+            save_interval,
+            output_file
+        );
+        println!("Reporting progress every {} steps", report_interval);
+        // Create HDF5 writer
+        let writer = HDF5Writer::new(output_file, save_interval, fields)?;
+
+        // Write metadata and materials (once at the beginning)
+        writer.write_metadata(self)?;
+        writer.write_materials(self)?;
+
+        // Write initial state
+        writer.write_snapshot(self, 0)?;
+
+        let mut frame_number = 1;
+
+        while !self.is_finished() {
+            self.step();
+
+            // Save snapshots
+            if self.current_timestep % save_interval == 0 {
+                writer.write_snapshot(self, frame_number)?;
+                frame_number += 1;
+            }
+
+            // Print progress
+            if self.current_timestep % report_interval == 0 {
+                println!(
+                    "Step {}/{} (t={:.4}s), frame {}",
+                    self.current_timestep,
+                    self.params.nt,
+                    self.current_time(),
+                    frame_number - 1
+                );
+            }
+        }
+
+        println!("Simulation complete!");
+        println!("Data saved to {}", output_file);
+        println!("Total frames: {}", frame_number);
+
+        Ok(())
     }
 }

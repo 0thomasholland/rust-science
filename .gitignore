@@ -22,3 +22,6 @@ target
 
 # Ignore any subdictories within output directory
 **/output/**/
+
+# ignore any hdf5 files
+*.h5
