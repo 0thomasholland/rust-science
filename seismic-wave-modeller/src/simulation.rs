@@ -47,10 +47,15 @@ impl Source {
         self.triggered = true;
     }
     pub fn ricker_wavelet(&self, t: f64) -> f64 {
-        // Ricker wavelet for this source
+        // Normalized Ricker wavelet for this source
+        // Peak amplitude is frequency-independent when properly normalized
         let tau = t - self.trigger_time.unwrap_or(0.0);
         let arg = (PI * self.frequency * tau).powi(2);
-        (1.0 - 2.0 * arg) * (-arg).exp()
+        let wavelet = (1.0 - 2.0 * arg) * (-arg).exp();
+        // Normalize by peak amplitude to maintain constant energy across frequencies
+        // Peak of (1 - 2*arg) * exp(-arg) occurs at arg = 0.5, with value ~ 0.3677
+        let normalization = 0.75 * PI * self.frequency * self.frequency;
+        wavelet * normalization
     }
 }
 
@@ -363,8 +368,7 @@ impl Simulation {
             }
 
             let amplitude = source.ricker_wavelet(t);
-            let scale = self.grid.dx * self.grid.dz;
-            let scaled_amplitude = amplitude * scale * source.amplitude;
+            let scaled_amplitude = amplitude * source.amplitude;
 
             self.wavefield_current.sigma_xx[[source.x, source.z]] += scaled_amplitude;
             self.wavefield_current.sigma_zz[[source.x, source.z]] += scaled_amplitude;
@@ -475,6 +479,73 @@ impl Simulation {
         self.current_timestep += 1;
     }
 
+    /// Compute total kinetic energy in the domain
+    /// KE = ∫ 0.5 * ρ * |v|² dV ≈ Σ 0.5 * ρ * (vx² + vz²) * dx * dz
+    pub fn compute_kinetic_energy(&self) -> f64 {
+        let dx = self.grid.dx;
+        let dz = self.grid.dz;
+        let cell_volume = dx * dz;
+        let mut ke = 0.0;
+
+        let (nx, nz) = self.wavefield_current.vx.dim();
+        for i in 0..nx {
+            for k in 0..nz {
+                let vx = self.wavefield_current.vx[[i, k]];
+                let vz = self.wavefield_current.vz[[i, k]];
+                let v_squared = vx * vx + vz * vz;
+                let rho = self.materials.rho[[i, k]];
+                ke += 0.5 * rho * v_squared * cell_volume;
+            }
+        }
+        ke
+    }
+
+    /// Compute total elastic potential energy in the domain
+    /// PE = ∫ 0.5 * (σ:ε) dV where : is double dot product
+    /// For 2D: PE ≈ Σ 0.5 * (σxx*exx + σzz*ezz + 2*σxz*exz) * dx * dz
+    /// where exx = ∂vx/∂x, ezz = ∂vz/∂z, exz = 0.5*(∂vx/∂z + ∂vz/∂x)
+    pub fn compute_potential_energy(&self) -> f64 {
+        let dx = self.grid.dx;
+        let dz = self.grid.dz;
+        let cell_volume = dx * dz;
+        let mut pe = 0.0;
+
+        let (nx, nz) = self.wavefield_current.vx.dim();
+        for i in 1..nx - 1 {
+            for k in 1..nz - 1 {
+                let sigma_xx = self.wavefield_current.sigma_xx[[i, k]];
+                let sigma_zz = self.wavefield_current.sigma_zz[[i, k]];
+                let sigma_xz = self.wavefield_current.sigma_xz[[i, k]];
+
+                // Compute strain components using finite differences
+                let exx = (self.wavefield_current.vx[[i, k]] - self.wavefield_current.vx[[i - 1, k]]) / dx;
+                let ezz = (self.wavefield_current.vz[[i, k]] - self.wavefield_current.vz[[i, k - 1]]) / dz;
+                let exz = 0.5 * (
+                    (self.wavefield_current.vx[[i, k + 1]] - self.wavefield_current.vx[[i, k - 1]]) / (2.0 * dz)
+                    + (self.wavefield_current.vz[[i + 1, k]] - self.wavefield_current.vz[[i - 1, k]]) / (2.0 * dx)
+                );
+
+                let strain_energy = sigma_xx * exx + sigma_zz * ezz + 2.0 * sigma_xz * exz;
+                pe += 0.5 * strain_energy * cell_volume;
+            }
+        }
+        pe
+    }
+
+    /// Compute and report total energy (kinetic + potential)
+    pub fn report_energy(&self) {
+        let ke = self.compute_kinetic_energy();
+        let pe = self.compute_potential_energy();
+        let total = ke + pe;
+        println!(
+            "t={:.4}s | KE={:.6e} | PE={:.6e} | Total={:.6e}",
+            self.current_time(),
+            ke,
+            pe,
+            total
+        );
+    }
+
     pub fn run_with_visualisation(
         &mut self,
         visualise_interval: usize,
@@ -493,6 +564,7 @@ impl Simulation {
 
         // Save initial state
         self.visualise_field(&visualiser, field);
+        self.report_energy();
 
         while !self.is_finished() {
             self.step();
@@ -502,7 +574,7 @@ impl Simulation {
                 self.visualise_field(&visualiser, field);
             }
 
-            // Print progress
+            // Print progress and energy every 100 steps
             if self.current_timestep % 100 == 0 {
                 println!(
                     "Step {}/{} (t={:.4}s)",
@@ -510,6 +582,7 @@ impl Simulation {
                     self.params.nt,
                     self.current_time()
                 );
+                self.report_energy();
             }
         }
 

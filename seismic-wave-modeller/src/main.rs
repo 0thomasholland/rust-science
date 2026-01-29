@@ -20,17 +20,17 @@ fn run() {
 
     let grid = Grid::new(nx, nz, dx, dz);
 
-    // Homogeneous material
-    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
-    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
-    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
+    // Homogeneous material (SI units)
+    let vp = Array2::from_elem((nx, nz), 6000.0); // 6000 m/s (P-wave velocity)
+    let vs = Array2::from_elem((nx, nz), 4000.0); // 4000 m/s (S-wave velocity)
+    let rho = Array2::from_elem((nx, nz), 3000.0); // 3000 kg/m³ (density)
 
     let materials = MaterialProperties::new(vp, vs, rho);
     let source0 = Source::new(nx / 2, nz / 2, 25.0, 10.0);
     let source1 = Source::new(nx / 4, nz / 2, 25.0, 10.0);
     let source2 = Source::new(3 * nx / 4, nz / 2, 25.0, 10.0);
 
-    let dt = 0.00001; // 40 microseconds
+    let dt = 0.00001; // 10 microseconds
     let length = 0.012; // simulated seconds
     let video_length = 10.0; // seconds
     let fps = 30.0; // frames per second
@@ -95,7 +95,7 @@ fn main() {
 }
 
 fn safe_params() {
-    //calcualtes safe simulation parameters
+    //calculates safe simulation parameters
     let nx = 100;
     let nz = 100;
     let dx = 0.1; // meters
@@ -103,10 +103,10 @@ fn safe_params() {
 
     let grid = Grid::new(nx, nz, dx, dz);
 
-    // Homogeneous material
-    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
-    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
-    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
+    // Homogeneous material (SI units)
+    let vp = Array2::from_elem((nx, nz), 6000.0); // 6000 m/s (P-wave velocity)
+    let vs = Array2::from_elem((nx, nz), 4000.0); // 4000 m/s (S-wave velocity)
+    let rho = Array2::from_elem((nx, nz), 3000.0); // 3000 kg/m³ (density)
 
     let materials = MaterialProperties::new(vp, vs, rho);
 
@@ -120,8 +120,4 @@ fn safe_params() {
     };
     let dt = parameters.compute_stable_dt(dx, dz, 6000.0); // Using max velocity
     println!("Calculated stable timestep: {} seconds", dt);
-}
-
-fn main() {
-    run();
 }
