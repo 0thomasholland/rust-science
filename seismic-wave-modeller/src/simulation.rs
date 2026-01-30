@@ -186,7 +186,6 @@ impl Simulation {
         let (nx, nz) = materials.lambda.dim();
         let mut vp_max = 0.0;
 
-        // TODO: Loop over all grid points and find max Vp
         // For each (i, k):
         //   vp = sqrt((lambda[[i,k]] + 2.0 * mu[[i,k]]) / rho[[i,k]])
         //   vp_max = vp_max.max(vp)
