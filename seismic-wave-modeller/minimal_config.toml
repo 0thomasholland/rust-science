@@ -1,0 +1,27 @@
+# Minimal configuration for seismic-wave-modeller
+# This shows only required parameters; optional ones use sensible defaults
+# Use this as a starting point for quick simulations
+
+[grid]
+nx = 400
+nz = 400
+dx = 0.125
+dz = 0.125
+
+[materials]
+vp = 6000.0
+vs = 4000.0
+rho = 3000.0
+
+[simulation]
+total_time = 0.012
+# dt will be auto-computed from CFL condition with default cfl_safety=0.5
+
+[[sources]]
+x = 200
+z = 200
+amplitude = 25.0
+frequency = 10.0
+
+[visualization]
+# Uses defaults: video_length=10.0, fps=30.0, field=vmag, image_width=1200, image_height=1000

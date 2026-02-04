@@ -81,7 +81,6 @@ impl Wavefield {
 
     pub fn compute_curl(&self, dx: f64, dz: f64) -> Array2<f64> {
         let (nx, nz) = self.vx.dim();
-        let mut div = Array2::<f64>::zeros((nx, nz));
         let mut curl = Array2::<f64>::zeros((nx, nz));
 
         // For i in 1..nx-1 and k in 1..nz-1:
@@ -91,9 +90,9 @@ impl Wavefield {
 
         for i in 1..nx - 1 {
             for k in 1..nz - 1 {
-                let dvx_dx = (self.vx[[i + 1, k]] - self.vx[[i - 1, k]]) / (2.0 * dx);
-                let dvz_dz = (self.vz[[i, k + 1]] - self.vz[[i, k - 1]]) / (2.0 * dz);
-                div[[i, k]] = dvx_dx + dvz_dz;
+                let dvx_dz = (self.vx[[i, k + 1]] - self.vx[[i, k - 1]]) / (2.0 * dz);
+                let dvz_dx = (self.vz[[i + 1, k]] - self.vz[[i - 1, k]]) / (2.0 * dx);
+                curl[[i, k]] = dvx_dz - dvz_dx;
             }
         }
 

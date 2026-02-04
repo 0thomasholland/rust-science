@@ -1,0 +1,84 @@
+# Example configuration for seismic-wave-modeller
+# This demonstrates all available parameters with comprehensive comments
+
+[grid]
+# Grid dimensions (number of grid points)
+nx = 800
+nz = 800
+# Grid spacing (meters)
+dx = 0.125
+dz = 0.125
+
+[materials]
+# P-wave velocity (m/s)
+vp = 6000.0
+# S-wave velocity (m/s) - must be less than vp
+vs = 4000.0
+# Density (kg/m³)
+rho = 3000.0
+
+[simulation]
+# Time step (seconds)
+# If omitted, will be automatically computed from CFL condition
+# dt = 0.00001
+
+# Total simulation time (seconds)
+total_time = 0.012
+
+# Progress reporting frequency (print status every N steps)
+report_period = 100
+
+# CFL safety factor (must be in range 0 < cfl_safety <= 1)
+# Default: 0.5
+# When dt is auto-computed: dt = cfl_safety * min(dx, dz) / vp_max
+cfl_safety = 0.5
+
+# Define multiple sources using [[sources]] array syntax
+[[sources]]
+# Grid position of source (grid points)
+x = 200
+z = 400
+# Source amplitude (energy strength)
+amplitude = 25.0
+# Source frequency (Hz) - controls Ricker wavelet frequency
+frequency = 10.0
+# Trigger delay (seconds) - delay before source starts radiating
+trigger_time = 0.0
+
+[[sources]]
+x = 400
+z = 400
+amplitude = 25.0
+frequency = 10.0
+trigger_time = 0.0
+
+[[sources]]
+x = 600
+z = 400
+amplitude = 25.0
+frequency = 10.0
+trigger_time = 0.0
+
+[visualization]
+# Output video length (seconds) - duration of animation
+video_length = 10.0
+
+# Frames per second for output video
+fps = 30.0
+
+# Field to visualize
+# Options: vx, vz, vmag, divergence, curl, sigma_xx, sigma_zz, sigma_xz
+# - vx, vz: Velocity components
+# - vmag: Velocity magnitude (sqrt(vx² + vz²))
+# - divergence: P-wave indicator (∇·v)
+# - curl: S-wave indicator (∇×v)
+# - sigma_xx, sigma_zz, sigma_xz: Stress tensor components
+field = "vmag"
+
+# Output directory iteration number (for organizing multiple runs)
+# Use with --iteration CLI flag to override
+iteration = 9
+
+# Output image dimensions (pixels)
+image_width = 1200
+image_height = 1000

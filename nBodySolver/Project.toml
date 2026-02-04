@@ -1,0 +1,4 @@
+name = "nBodySolver"
+uuid = "8693aa1a-685f-4f72-82e4-b1eed7559df2"
+version = "0.1.0"
+authors = ["Thomas Holland <101332229+0thomasholland@users.noreply.github.com>"]

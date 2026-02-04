@@ -1,79 +1,124 @@
 // TESTS //
+mod config;
 mod grid;
 mod materials;
 mod simulation;
 mod visualisation;
 mod wavefield;
 
+use anyhow::Result;
+use clap::Parser;
+use config::Config;
 use grid::Grid;
 use materials::MaterialProperties;
 use ndarray::Array2;
 use simulation::{Simulation, SimulationParams, Source};
-use wavefield::Wavefield;
 
-fn run() {
-    // Define grid
-    let nx = 400;
-    let nz = 400;
-    let dx = 0.1; // meters
-    let dz = 0.1;
+#[derive(Parser)]
+#[command(name = "seismic-wave-modeller")]
+#[command(about = "2D elastic wave propagation simulator", long_about = None)]
+struct Cli {
+    /// Path to TOML configuration file
+    #[arg(short, long)]
+    config: String,
 
+    /// Override output directory iteration number
+    #[arg(short, long)]
+    iteration: Option<i64>,
+
+    /// Verbose output
+    #[arg(short, long)]
+    verbose: bool,
+}
+
+fn run_simulation(config: Config, verbose: bool) -> Result<()> {
+    // Print configuration summary if verbose
+    if verbose {
+        config.print_summary();
+    }
+
+    // Get simulation parameters
+    let nx = config.grid.nx;
+    let nz = config.grid.nz;
+    let dx = config.grid.dx;
+    let dz = config.grid.dz;
+    let dt = config.simulation.dt.unwrap();
+    let total_time = config.simulation.total_time;
+    let nt = config.simulation.compute_nt(dt);
+
+    // Build grid
     let grid = Grid::new(nx, nz, dx, dz);
 
-    // Homogeneous material
-    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
-    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
-    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
-
+    // Build homogeneous material properties
+    let vp = Array2::from_elem((nx, nz), config.materials.vp);
+    let vs = Array2::from_elem((nx, nz), config.materials.vs);
+    let rho = Array2::from_elem((nx, nz), config.materials.rho);
     let materials = MaterialProperties::new(vp, vs, rho);
-    let source = Source::new(nx / 2, nz / 2, 25.0);
 
-    let dt = 0.000008;
-    let length = 0.004;
-    let params = SimulationParams {
-        dt: dt, // We'll calculate proper value later
-        nt: (length / dt) as usize,
-        report_period: 100,
-        sources: vec![source],
-        cfl_safety: 0.5,
+    // Build sources from configuration
+    let sources: Vec<Source> = config
+        .sources
+        .into_iter()
+        .map(|src| {
+            if src.trigger_time > 0.0 {
+                Source::with_delay(src.x, src.z, src.amplitude, src.frequency, src.trigger_time)
+            } else {
+                Source::new(src.x, src.z, src.amplitude, src.frequency)
+            }
+        })
+        .collect();
+
+    // Build simulation parameters
+    let sim_params = SimulationParams {
+        dt,
+        nt,
+        report_period: config.simulation.report_period,
+        sources,
+        cfl_safety: config.simulation.cfl_safety,
     };
+
+    // Verify CFL condition
+    sim_params.check_cfl(dx, dz, config.materials.vp);
+
+    // Print summary
+    println!("Running simulation with dt = {} seconds", dt);
+    println!("Simulation length: {} seconds", total_time);
+    println!("Total steps: {}", nt);
+    println!("Visualization time: {} seconds", config.visualization.video_length);
 
     // Initialize simulation
-    let mut sim = Simulation::new(grid, materials, params);
+    let mut sim = Simulation::new(grid, materials, sim_params);
 
-    // Run just a few steps
-    sim.run_with_visualisation(10, "vmag");
+    // Calculate visualization step rate
+    let step_rate = (((nt as f64) / (config.visualization.video_length * config.visualization.fps)) as f64)
+        .round() as usize;
+    let step_rate = step_rate.max(1); // Ensure at least 1 step per frame
 
-    // "ffmpeg -framerate 30 -pattern_type glob -i 'output/2/vmag_*.png' -c:v libx264 -pix_fmt yuv420p output/2.mp4");
+    if verbose {
+        println!("Visualization step rate: {} steps per frame", step_rate);
+    }
+
+    // Run simulation with visualization
+    sim.run_with_visualisation(step_rate, &config.visualization.field, config.visualization.iteration);
+
+    Ok(())
 }
 
-fn safe_params() { //calcualtes safe simulation parameters
-    let nx = 100;
-    let nz = 100;
-    let dx = 0.1; // meters
-    let dz = 0.1;
+fn main() -> Result<()> {
+    let cli = Cli::parse();
 
-    let grid = Grid::new(nx, nz, dx, dz);
+    // Load configuration from file
+    let config = Config::from_file(&cli.config)?;
 
-    // Homogeneous material
-    let vp = Array2::from_elem((nx, nz), 6000.0); // 6 km/s
-    let vs = Array2::from_elem((nx, nz), 4000.0); // 4 km/s
-    let rho = Array2::from_elem((nx, nz), 3000.0); // 3 g/cm³
+    // Override iteration if provided via CLI
+    let mut config = config;
+    if let Some(iteration) = cli.iteration {
+        config.visualization.iteration = iteration;
+    }
 
-    let materials = MaterialProperties::new(vp, vs, rho);
+    // Run simulation
+    run_simulation(config, cli.verbose)?;
 
-    let cfl_safety = 0.5;
-    let parameters = SimulationParams {
-        dt: 0.0, // Placeholder
-        nt: 1000,
-        report_period: 100,
-        sources: vec![],
-        cfl_safety,
-    };
-    let dt = parameters.compute_stable_dt(dx, dz, 6000.0); // Using max velocity
-    println!("Calculated stable timestep: {} seconds", dt);
+    Ok(())
 }
 
-fn main() {
-    run();
-}
