@@ -53,59 +53,73 @@ contains
     subroutine redistribute_cells(grid, unit)
         type(grid_type), intent(inout) :: grid
         integer, intent(in) :: unit
-        integer, allocatable :: temp_cells(:,:)
         integer :: i, j
         logical :: redistributed
 
         grid%iteration = grid%iteration + 1
-        allocate(temp_cells(grid%nx, grid%ny))
 
         do while (.true.)
             redistributed = .false.
 
-            ! Phase 1: Process even cells (i+j is even) - no atomic contention
-            temp_cells = grid%cells
+            ! Phase 1: Process even cells (i+j is even) - minimal atomic contention
             !$omp parallel do collapse(2) reduction(.or.:redistributed)
             do i = 1, grid%nx
                 do j = 1, grid%ny
-                    if (mod(i+j, 2) == 0 .and. temp_cells(i,j) >= 4) then
-                        temp_cells(i,j) = temp_cells(i,j) - 4
-
-                        if (i > 1) temp_cells(i-1,j) = temp_cells(i-1,j) + 1
-                        if (i < grid%nx) temp_cells(i+1,j) = temp_cells(i+1,j) + 1
-                        if (j > 1) temp_cells(i,j-1) = temp_cells(i,j-1) + 1
-                        if (j < grid%ny) temp_cells(i,j+1) = temp_cells(i,j+1) + 1
+                    if (mod(i+j, 2) == 0 .and. grid%cells(i,j) >= 4) then
+                        grid%cells(i,j) = grid%cells(i,j) - 4
+                        if (i > 1) then
+                            !$omp atomic
+                            grid%cells(i-1,j) = grid%cells(i-1,j) + 1
+                        end if
+                        if (i < grid%nx) then
+                            !$omp atomic
+                            grid%cells(i+1,j) = grid%cells(i+1,j) + 1
+                        end if
+                        if (j > 1) then
+                            !$omp atomic
+                            grid%cells(i,j-1) = grid%cells(i,j-1) + 1
+                        end if
+                        if (j < grid%ny) then
+                            !$omp atomic
+                            grid%cells(i,j+1) = grid%cells(i,j+1) + 1
+                        end if
                         redistributed = .true.
                     end if
                 end do
             end do
             !$omp end parallel do
-            grid%cells = temp_cells
 
-            ! Phase 2: Process odd cells (i+j is odd) - no atomic contention
-            temp_cells = grid%cells
+            ! Phase 2: Process odd cells (i+j is odd) - minimal atomic contention
             !$omp parallel do collapse(2) reduction(.or.:redistributed)
             do i = 1, grid%nx
                 do j = 1, grid%ny
-                    if (mod(i+j, 2) == 1 .and. temp_cells(i,j) >= 4) then
-                        temp_cells(i,j) = temp_cells(i,j) - 4
-
-                        if (i > 1) temp_cells(i-1,j) = temp_cells(i-1,j) + 1
-                        if (i < grid%nx) temp_cells(i+1,j) = temp_cells(i+1,j) + 1
-                        if (j > 1) temp_cells(i,j-1) = temp_cells(i,j-1) + 1
-                        if (j < grid%ny) temp_cells(i,j+1) = temp_cells(i,j+1) + 1
+                    if (mod(i+j, 2) == 1 .and. grid%cells(i,j) >= 4) then
+                        grid%cells(i,j) = grid%cells(i,j) - 4
+                        if (i > 1) then
+                            !$omp atomic
+                            grid%cells(i-1,j) = grid%cells(i-1,j) + 1
+                        end if
+                        if (i < grid%nx) then
+                            !$omp atomic
+                            grid%cells(i+1,j) = grid%cells(i+1,j) + 1
+                        end if
+                        if (j > 1) then
+                            !$omp atomic
+                            grid%cells(i,j-1) = grid%cells(i,j-1) + 1
+                        end if
+                        if (j < grid%ny) then
+                            !$omp atomic
+                            grid%cells(i,j+1) = grid%cells(i,j+1) + 1
+                        end if
                         redistributed = .true.
                     end if
                 end do
             end do
             !$omp end parallel do
-            grid%cells = temp_cells
 
             call write_grid_diff(grid, unit)
             if (.not. redistributed) exit
         end do
-
-        deallocate(temp_cells)
 
     end subroutine redistribute_cells
 
@@ -200,18 +214,28 @@ contains
 
         has_diff = .false.
 
-        ! Single pass: write diffs as we find them, header written on first diff
+        ! Check if there are any differences
         do i = 1, grid%nx
             do j = 1, grid%ny
                 if (grid%cells(i,j) /= grid%prev_cells(i,j)) then
-                    if (.not. has_diff) then
-                        write(unit,'(A,I0)') '#D', grid%iteration
-                        has_diff = .true.
-                    end if
-                    write(unit,'(I0,A,I0,A,I0)') i, ',', j, ',', grid%cells(i,j)
+                    has_diff = .true.
+                    exit
                 end if
             end do
+            if (has_diff) exit
         end do
+
+        ! Write header only if there are differences
+        if (has_diff) then
+            write(unit,'(A,I0)') '#D', grid%iteration
+            do i = 1, grid%nx
+                do j = 1, grid%ny
+                    if (grid%cells(i,j) /= grid%prev_cells(i,j)) then
+                        write(unit,'(I0,A,I0,A,I0)') i, ',', j, ',', grid%cells(i,j)
+                    end if
+                end do
+            end do
+        end if
 
         ! Update previous state
         grid%prev_cells = grid%cells

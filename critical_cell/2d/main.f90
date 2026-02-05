@@ -41,7 +41,9 @@ program critical_cellular_automaton
         grid%iteration = iteration
         call write_grid_diff(grid, output_unit)
 
-        call redistribute_cells(grid, output_unit)
+        do while (check_critical(grid))
+            call redistribute_cells(grid, output_unit)
+        end do
 
         if (mod(iteration, max_iterations/20) == 0) then
             print *, 'Iteration: ', iteration, ' Total grains: ', get_sum(grid)
