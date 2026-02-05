@@ -34,7 +34,7 @@ contains
             do i = 1, nx
                 do j = 1, ny
                     call random_number(rand_val)
-                    grid%cells(i,j) = int(rand_val * 6)
+                    grid%cells(i,j) = int(rand_val * 3)
                 end do
             end do
 
@@ -57,7 +57,7 @@ contains
             redistributed = .false.
             do i = 1, grid%nx
                 do j = 1, grid%ny
-                    if (grid%cells(i,j) > 4) then
+                    if (grid%cells(i,j) >= 4) then
                         grid%cells(i,j) = grid%cells(i,j) - 4
                         if (i > 1) grid%cells(i-1,j) = grid%cells(i-1,j) + 1
                         if (i < grid%nx) grid%cells(i+1,j) = grid%cells(i+1,j) + 1
@@ -81,7 +81,7 @@ contains
         has_critical = .false.
         do i = 1, grid%nx
             do j = 1, grid%ny
-                if (grid%cells(i,j) > 4) then
+                if (grid%cells(i,j) >= 4) then
                     has_critical = .true.
                     return
                 end if

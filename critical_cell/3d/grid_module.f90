@@ -36,7 +36,7 @@ contains
                 do j = 1, ny
                     do k = 1, nz
                         call random_number(rand_val)
-                        grid%cells(i,j,k) = int(rand_val * 6)
+                        grid%cells(i,j,k) = int(rand_val * 5)
                     end do
                 end do
             end do
@@ -61,7 +61,7 @@ contains
             do i = 1, grid%nx
                 do j = 1, grid%ny
                     do k = 1, grid%nz
-                        if (grid%cells(i,j,k) > 6) then
+                        if (grid%cells(i,j,k) >= 6) then
                             grid%cells(i,j,k) = grid%cells(i,j,k) - 6
                             if (i > 1) grid%cells(i-1,j,k) = grid%cells(i-1,j,k) + 1
                             if (i < grid%nx) grid%cells(i+1,j,k) = grid%cells(i+1,j,k) + 1
@@ -89,7 +89,7 @@ contains
         do i = 1, grid%nx
             do j = 1, grid%ny
                 do k = 1, grid%nz
-                    if (grid%cells(i,j,k) > 6) then
+                    if (grid%cells(i,j,k) >= 6) then
                         has_critical = .true.
                         return
                     end if
