@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-3D Visualization of Critical Cellular Automaton
+2D Visualization of Critical Cellular Automaton
 Reads output from the Fortran simulation and creates an animated MP4 video
 """
 
@@ -10,11 +10,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
-from mpl_toolkits.mplot3d import Axes3D
 
 
-def parse_output_file(filename, grid_size=(20, 20, 20)):
-    nx, ny, nz = grid_size
+def parse_output_file(filename, grid_size=(20, 20)):
+    nx, ny = grid_size
     iterations = {}
 
     try:
@@ -38,13 +37,12 @@ def parse_output_file(filename, grid_size=(20, 20, 20)):
                     if current_iteration is not None:
                         try:
                             parts = line.split()
-                            if len(parts) >= 4:
+                            if len(parts) >= 3:
                                 i = int(parts[0]) - 1  # Convert to 0-indexed
                                 j = int(parts[1]) - 1
-                                k = int(parts[2]) - 1
-                                value = int(parts[3])
+                                value = int(parts[2])
 
-                                iterations[current_iteration][(i, j, k)] = value
+                                iterations[current_iteration][(i, j)] = value
                         except (ValueError, IndexError):
                             continue
     except FileNotFoundError:
@@ -55,59 +53,37 @@ def parse_output_file(filename, grid_size=(20, 20, 20)):
     sorted_iterations = sorted(iterations.keys())
 
     for iteration in sorted_iterations:
-        grid = np.zeros((nx, ny, nz), dtype=int)
-        for (i, j, k), value in iterations[iteration].items():
-            if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                grid[i, j, k] = value
+        grid = np.zeros((nx, ny), dtype=int)
+        for (i, j), value in iterations[iteration].items():
+            if 0 <= i < nx and 0 <= j < ny:
+                grid[i, j] = value
         grid_states.append(grid)
 
     return grid_states, sorted_iterations
 
 
 def create_visualization(
-    grid_states, output_file="animation.mp4", fps=30, grid_size=(20, 20, 20)
+    grid_states, output_file="animation.mp4", fps=30, grid_size=(20, 20)
 ):
-    nx, ny, nz = grid_size
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection="3d")
+    nx, ny = grid_size
+    fig, ax = plt.subplots(figsize=(8, 8))
 
-    all_values = np.concatenate([grid.flatten() for grid in grid_states])
-    vmin, vmax = all_values.min(), all_values.max()
+    # Create initial plot with colorbar outside the update loop
+    grid = grid_states[0]
+    display_grid = np.clip(grid, 0, 4).astype(float)
+    im = ax.imshow(display_grid, cmap="hot", vmin=0, vmax=4, origin="lower")
+    cbar = plt.colorbar(im, ax=ax, label="Grain Count")
 
     def update(frame):
         """Update function for animation."""
-        ax.clear()
-
         grid = grid_states[frame]
-        i_coords, j_coords, k_coords = np.where(grid > 0)
 
-        if len(i_coords) > 0:
-            values = grid[i_coords, j_coords, k_coords]
-            normalized = (values - 4.0) / 2.0
-            normalized = np.clip(normalized, 0, 1)
-            sizes = 50 + normalized * 400
-            colors_rgb = plt.cm.hot(normalized)
-            colors_rgba = colors_rgb.copy()
-            colors_rgba[:, 3] = normalized
-
-            scatter = ax.scatter(
-                i_coords,
-                j_coords,
-                k_coords,
-                c=colors_rgba,
-                s=sizes,
-                edgecolors="none",
-            )
+        # Update image data instead of clearing
+        display_grid = np.clip(grid, 0, 4).astype(float)
+        im.set_data(display_grid)
 
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
-        ax.set_xlim(0, nx)
-        ax.set_ylim(0, ny)
-        ax.set_zlim(0, nz)
-
-        rotation_angle = (frame / len(grid_states)) * 360
-        ax.view_init(elev=20, azim=rotation_angle)
 
         total_grains = np.sum(grid)
         ax.set_title(
@@ -116,7 +92,7 @@ def create_visualization(
             fontweight="bold",
         )
 
-        return (ax,)
+        return (im,)
 
     print(f"Creating animation with {len(grid_states)} frames...")
     anim = FuncAnimation(
@@ -150,7 +126,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Visualize critical cellular automaton simulation as 3D rotating video"
+        description="Visualize 2D critical cellular automaton simulation as heatmap video"
     )
     parser.add_argument(
         "--input",
@@ -170,10 +146,10 @@ def main():
     parser.add_argument(
         "--grid-size",
         type=int,
-        nargs=3,
-        default=[20, 20, 20],
-        metavar=("NX", "NY", "NZ"),
-        help="Grid dimensions (default: 20 20 20)",
+        nargs=2,
+        default=[40, 40],
+        metavar=("NX", "NY"),
+        help="Grid dimensions (default: 40 40)",
     )
 
     args = parser.parse_args()
@@ -191,7 +167,7 @@ def main():
         sys.exit(1)
 
     print(f"Parsed {len(grid_states)} simulation frames")
-    print(f"Grid size: {grid_size[0]} x {grid_size[1]} x {grid_size[2]}")
+    print(f"Grid size: {grid_size[0]} x {grid_size[1]}")
 
     create_visualization(
         grid_states, output_file=args.output, fps=args.fps, grid_size=grid_size
