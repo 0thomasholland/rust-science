@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 2D Visualization of Critical Cellular Automaton
-Reads output from the Fortran simulation and creates an animated MP4 video
 """
 
 import sys
@@ -9,88 +8,89 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.animation import FuncAnimation
-from matplotlib.colors import ListedColormap
+from matplotlib.animation import FFMpegWriter, FuncAnimation
 
 
 def parse_output_file(filename, grid_size=(20, 20)):
+    """Parse output file efficiently using NumPy."""
     nx, ny = grid_size
-    grid_states = []
-    current_grid = np.zeros((nx, ny), dtype=int)
-    sorted_iterations = []
 
-    try:
-        with open(filename, "r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
+    # First pass: count frames
+    with open(filename, "r") as f:
+        num_frames = sum(1 for line in f if line.startswith("#D"))
+
+    if num_frames == 0:
+        return [], []
+
+    # Pre-allocate storage
+    grid_states = np.zeros((num_frames + 1, nx, ny), dtype=np.int32)
+    iterations = []
+    current_frame = 0
+
+    with open(filename, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.startswith("#INIT"):
+                current_frame = 0
+                grid_states[0, :, :] = 0
+            elif line.startswith("#D"):
+                current_frame += 1
+                # Copy previous state
+                grid_states[current_frame] = grid_states[current_frame - 1]
+                try:
+                    iteration = int(line[2:])
+                    iterations.append(iteration)
+                    if iteration % 1000 == 0:
+                        print(f"Found iteration: {iteration}")
+                except ValueError:
+                    iterations.append(current_frame)
+            else:
+                try:
+                    i, j, value = map(int, line.split(",")[:3])
+                    i, j = i - 1, j - 1  # Convert to 0-indexed
+
+                    if 0 <= i < nx and 0 <= j < ny:
+                        grid_states[current_frame, i, j] = value
+                except (ValueError, IndexError):
                     continue
 
-                if line.startswith("#INIT"):
-                    current_grid = np.zeros((nx, ny), dtype=int)
-                elif line.startswith("#D"):
-                    grid_states.append(current_grid.copy())
-                    try:
-                        iteration = int(line[2:])
-                        sorted_iterations.append(iteration)
-                        if iteration % 1000 == 0:
-                            print(f"Found iteration: {iteration}")
-                    except ValueError:
-                        pass
-                else:
-                    try:
-                        parts = line.split(",")
-                        if len(parts) >= 3:
-                            i = int(parts[0]) - 1
-                            j = int(parts[1]) - 1
-                            value = int(parts[2])
-
-                            if 0 <= i < nx and 0 <= j < ny:
-                                current_grid[i, j] = value
-                    except (ValueError, IndexError):
-                        continue
-
-            if len(grid_states) == 0 or not np.array_equal(
-                grid_states[-1], current_grid
-            ):
-                grid_states.append(current_grid.copy())
-
-    except FileNotFoundError:
-        print(f"Error: File '{filename}' not found.")
-        sys.exit(1)
-
-    return grid_states, sorted_iterations
+    return grid_states[: current_frame + 1], iterations
 
 
 def create_visualization(
     grid_states, output_file="animation.mp4", fps=30, grid_size=(40, 40)
 ):
-    nx, ny = grid_size
+    """Create optimized animation with proper blitting."""
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    max_value = max(np.max(grid) for grid in grid_states)
+    max_value = np.max(grid_states)
 
-    grid = grid_states[0]
-    im = ax.imshow(grid, cmap="Greys", vmin=0, vmax=max_value, origin="lower")
+    # Initial setup
+    im = ax.imshow(
+        grid_states[0],
+        cmap="Greys",
+        vmin=0,
+        vmax=max_value,
+        origin="lower",
+        interpolation="nearest",  # Faster rendering
+    )
     cbar = plt.colorbar(im, ax=ax, label="Grain Count")
 
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    title = ax.set_title("", fontsize=12, fontweight="bold")
+
+    # Pre-calculate total grains for all frames
+    total_grains = grid_states.sum(axis=(1, 2))
+
     def update(frame):
-        """Update function for animation."""
-        grid = grid_states[frame]
-
-        im.set_data(grid)
-
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-
-        total_grains = np.sum(grid)
-        ax.set_title(
-            f"Iteration {frame + 1} | Total Grains: {total_grains}",
-            fontsize=12,
-            fontweight="bold",
-        )
-
-        return (im,)
+        """Update function with minimal operations."""
+        im.set_array(grid_states[frame])
+        title.set_text(f"Iteration {frame + 1} | Total Grains: {total_grains[frame]}")
+        return im, title
 
     print(f"Creating animation with {len(grid_states)} frames...")
     anim = FuncAnimation(
@@ -98,24 +98,19 @@ def create_visualization(
         update,
         frames=len(grid_states),
         interval=1000 // fps,
-        blit=False,
+        blit=True,  # Now properly returns artists
         repeat=True,
     )
 
     print(f"Saving animation to '{output_file}'...")
-    try:
-        from matplotlib.animation import FFMpegWriter
+    writer = FFMpegWriter(fps=fps, bitrate=2000, extra_args=["-preset", "ultrafast"])
 
-        writer = FFMpegWriter(
-            fps=fps, bitrate=2000, extra_args=["-preset", "ultrafast"]
-        )
+    try:
         anim.save(output_file, writer=writer, dpi=100)
         print(f"✓ Animation saved successfully to '{output_file}'")
     except Exception as e:
         print(f"Error saving animation: {e}")
-        print("Make sure you have ffmpeg installed:")
-        print("  macOS: brew install ffmpeg")
-        print("  Ubuntu: sudo apt-get install ffmpeg")
+        print("Make sure you have ffmpeg installed")
         sys.exit(1)
 
     plt.close(fig)
@@ -125,30 +120,13 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Visualize 2D critical cellular automaton simulation as heatmap video"
+        description="Visualize 2D critical cellular automaton"
     )
+    parser.add_argument("--input", "-i", default="output.csv")
+    parser.add_argument("--output", "-o", default="animation.mp4")
+    parser.add_argument("--fps", type=int, default=30)
     parser.add_argument(
-        "--input",
-        "-i",
-        default="output.csv",
-        help="Input txt file from Fortran simulation (default: output.csv)",
-    )
-    parser.add_argument(
-        "--output",
-        "-o",
-        default="animation.mp4",
-        help="Output MP4 file (default: animation.mp4)",
-    )
-    parser.add_argument(
-        "--fps", type=int, default=30, help="Frames per second (default: 30)"
-    )
-    parser.add_argument(
-        "--grid-size",
-        type=int,
-        nargs=2,
-        default=[40, 40],
-        metavar=("NX", "NY"),
-        help="Grid dimensions (default: 40 40)",
+        "--grid-size", type=int, nargs=2, default=[40, 40], metavar=("NX", "NY")
     )
 
     args = parser.parse_args()
@@ -161,7 +139,7 @@ def main():
     print(f"Reading simulation data from '{args.input}'...")
     grid_states, iterations = parse_output_file(args.input, grid_size=grid_size)
 
-    if not grid_states:
+    if len(grid_states) == 0:
         print("Error: No valid data found in input file.")
         sys.exit(1)
 

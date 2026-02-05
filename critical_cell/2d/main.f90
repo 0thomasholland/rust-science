@@ -12,9 +12,9 @@ program critical_cellular_automaton
 
     integer :: nx, ny
 
-    nx = 2000
-    ny = 2000
-    max_iterations = 1000
+    nx = 20
+    ny = 20
+    max_iterations = 4000
     init_type = 'random'
     output_file = 'output.csv'
 
