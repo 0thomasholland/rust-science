@@ -17,7 +17,7 @@ program critical_cellular_automaton
     nz = 20
     max_iterations = 1000
     init_type = 'random'
-    output_file = 'output.txt'
+    output_file = 'output.csv'
 
     call initialize_grid(grid, nx, ny, nz, init_type)
 
@@ -28,13 +28,10 @@ program critical_cellular_automaton
     print *, 'Initialization type: ', trim(init_type)
     print *, 'Max iterations: ', max_iterations
 
+    ! Write initial state
+    call write_initial_state(grid, output_unit)
+
     do iteration = 1, max_iterations
-
-        do while (check_critical(grid))
-            call redistribute_cells(grid)
-            call write_grid_state(grid, output_unit)
-        end do
-
 
         call random_number(rand_x)
         call random_number(rand_y)
@@ -45,8 +42,11 @@ program critical_cellular_automaton
         call add_grain(grid, random_x, random_y, random_z)
 
         grid%iteration = iteration
+        call write_grid_diff(grid, output_unit)
 
-        call write_grid_state(grid, output_unit)
+        do while (check_critical(grid))
+            call redistribute_cells(grid, output_unit)
+        end do
 
         if (mod(iteration, 10) == 0) then
             print *, 'Iteration: ', iteration, ' Total grains: ', get_sum(grid)

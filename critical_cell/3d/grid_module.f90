@@ -2,10 +2,11 @@ module grid_module
     implicit none
     private
     public :: grid_type, initialize_grid, redistribute_cells, check_critical, &
-              get_sum, write_grid_state, add_grain
+              get_sum, write_grid_state, add_grain, write_initial_state, write_grid_diff
 
     type :: grid_type
         integer, allocatable :: cells(:,:,:)
+        integer, allocatable :: prev_cells(:,:,:)
         integer :: nx, ny, nz
         integer :: iteration
     end type grid_type
@@ -25,6 +26,7 @@ contains
         grid%iteration = 0
 
         allocate(grid%cells(nx, ny, nz))
+        allocate(grid%prev_cells(nx, ny, nz))
 
         select case(trim(init_type))
         case('blank')
@@ -46,11 +48,14 @@ contains
             stop
         end select
 
+        grid%prev_cells = grid%cells
+
     end subroutine initialize_grid
 
 
-    subroutine redistribute_cells(grid)
+    subroutine redistribute_cells(grid, unit)
         type(grid_type), intent(inout) :: grid
+        integer, intent(in) :: unit
         integer :: i, j, k
         logical :: redistributed
 
@@ -74,6 +79,7 @@ contains
                     end do
                 end do
             end do
+            call write_grid_diff(grid, unit)
             if (.not. redistributed) exit
         end do
 
@@ -139,15 +145,78 @@ contains
         integer, intent(in) :: unit
         integer :: i, j, k
 
-        write(unit,*) 'Iteration:', grid%iteration
+        write(unit,'(A,I0)') '#', grid%iteration
         do i = 1, grid%nx
             do j = 1, grid%ny
                 do k = 1, grid%nz
-                    write(unit,*) i, j, k, grid%cells(i,j,k)
+                    if (grid%cells(i,j,k) > 0) then
+                        write(unit,'(I0,A,I0,A,I0,A,I0)') i, ',', j, ',', k, ',', grid%cells(i,j,k)
+                    end if
                 end do
             end do
         end do
 
     end subroutine write_grid_state
+
+
+    subroutine write_initial_state(grid, unit)
+        type(grid_type), intent(in) :: grid
+        integer, intent(in) :: unit
+        integer :: i, j, k
+
+        write(unit,'(A)') '#INIT'
+        do i = 1, grid%nx
+            do j = 1, grid%ny
+                do k = 1, grid%nz
+                    if (grid%cells(i,j,k) > 0) then
+                        write(unit,'(I0,A,I0,A,I0,A,I0)') i, ',', j, ',', k, ',', grid%cells(i,j,k)
+                    end if
+                end do
+            end do
+        end do
+
+    end subroutine write_initial_state
+
+
+    subroutine write_grid_diff(grid, unit)
+        type(grid_type), intent(inout) :: grid
+        integer, intent(in) :: unit
+        integer :: i, j, k
+        logical :: has_diff
+
+        has_diff = .false.
+
+        ! Check if there are any differences
+        do i = 1, grid%nx
+            do j = 1, grid%ny
+                do k = 1, grid%nz
+                    if (grid%cells(i,j,k) /= grid%prev_cells(i,j,k)) then
+                        has_diff = .true.
+                        exit
+                    end if
+                end do
+                if (has_diff) exit
+            end do
+            if (has_diff) exit
+        end do
+
+        ! Write header only if there are differences
+        if (has_diff) then
+            write(unit,'(A,I0)') '#D', grid%iteration
+            do i = 1, grid%nx
+                do j = 1, grid%ny
+                    do k = 1, grid%nz
+                        if (grid%cells(i,j,k) /= grid%prev_cells(i,j,k)) then
+                            write(unit,'(I0,A,I0,A,I0,A,I0)') i, ',', j, ',', k, ',', grid%cells(i,j,k)
+                        end if
+                    end do
+                end do
+            end do
+        end if
+
+        ! Update previous state
+        grid%prev_cells = grid%cells
+
+    end subroutine write_grid_diff
 
 end module grid_module

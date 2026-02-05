@@ -10,77 +10,75 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 
 
 def parse_output_file(filename, grid_size=(20, 20)):
     nx, ny = grid_size
-    iterations = {}
+    grid_states = []
+    current_grid = np.zeros((nx, ny), dtype=int)
+    sorted_iterations = []
 
     try:
         with open(filename, "r") as f:
-            current_iteration = None
-
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                if "Iteration:" in line:
-                    parts = line.split(":")
-                    if len(parts) >= 2:
-                        try:
-                            current_iteration = int(parts[1].strip())
-                            if current_iteration not in iterations:
-                                iterations[current_iteration] = {}
-                        except ValueError:
-                            continue
-                else:
-                    if current_iteration is not None:
-                        try:
-                            parts = line.split()
-                            if len(parts) >= 3:
-                                i = int(parts[0]) - 1  # Convert to 0-indexed
-                                j = int(parts[1]) - 1
-                                value = int(parts[2])
 
-                                iterations[current_iteration][(i, j)] = value
-                        except (ValueError, IndexError):
-                            continue
+                if line.startswith("#INIT"):
+                    current_grid = np.zeros((nx, ny), dtype=int)
+                elif line.startswith("#D"):
+                    grid_states.append(current_grid.copy())
+                    try:
+                        iteration = int(line[2:])
+                        sorted_iterations.append(iteration)
+                        if iteration % 1000 == 0:
+                            print(f"Found iteration: {iteration}")
+                    except ValueError:
+                        pass
+                else:
+                    try:
+                        parts = line.split(",")
+                        if len(parts) >= 3:
+                            i = int(parts[0]) - 1
+                            j = int(parts[1]) - 1
+                            value = int(parts[2])
+
+                            if 0 <= i < nx and 0 <= j < ny:
+                                current_grid[i, j] = value
+                    except (ValueError, IndexError):
+                        continue
+
+            if len(grid_states) == 0 or not np.array_equal(
+                grid_states[-1], current_grid
+            ):
+                grid_states.append(current_grid.copy())
+
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
         sys.exit(1)
-
-    grid_states = []
-    sorted_iterations = sorted(iterations.keys())
-
-    for iteration in sorted_iterations:
-        grid = np.zeros((nx, ny), dtype=int)
-        for (i, j), value in iterations[iteration].items():
-            if 0 <= i < nx and 0 <= j < ny:
-                grid[i, j] = value
-        grid_states.append(grid)
 
     return grid_states, sorted_iterations
 
 
 def create_visualization(
-    grid_states, output_file="animation.mp4", fps=30, grid_size=(20, 20)
+    grid_states, output_file="animation.mp4", fps=30, grid_size=(40, 40)
 ):
     nx, ny = grid_size
     fig, ax = plt.subplots(figsize=(8, 8))
 
-    # Create initial plot with colorbar outside the update loop
+    max_value = max(np.max(grid) for grid in grid_states)
+
     grid = grid_states[0]
-    display_grid = np.clip(grid, 0, 4).astype(float)
-    im = ax.imshow(display_grid, cmap="hot", vmin=0, vmax=4, origin="lower")
+    im = ax.imshow(grid, cmap="Greys", vmin=0, vmax=max_value, origin="lower")
     cbar = plt.colorbar(im, ax=ax, label="Grain Count")
 
     def update(frame):
         """Update function for animation."""
         grid = grid_states[frame]
 
-        # Update image data instead of clearing
-        display_grid = np.clip(grid, 0, 4).astype(float)
-        im.set_data(display_grid)
+        im.set_data(grid)
 
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
@@ -104,12 +102,13 @@ def create_visualization(
         repeat=True,
     )
 
-    # Save as MP4
     print(f"Saving animation to '{output_file}'...")
     try:
         from matplotlib.animation import FFMpegWriter
 
-        writer = FFMpegWriter(fps=fps, bitrate=1800)
+        writer = FFMpegWriter(
+            fps=fps, bitrate=2000, extra_args=["-preset", "ultrafast"]
+        )
         anim.save(output_file, writer=writer, dpi=100)
         print(f"✓ Animation saved successfully to '{output_file}'")
     except Exception as e:
@@ -131,8 +130,8 @@ def main():
     parser.add_argument(
         "--input",
         "-i",
-        default="output.txt",
-        help="Input txt file from Fortran simulation (default: output.txt)",
+        default="output.csv",
+        help="Input txt file from Fortran simulation (default: output.csv)",
     )
     parser.add_argument(
         "--output",

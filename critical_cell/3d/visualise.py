@@ -15,51 +15,50 @@ from mpl_toolkits.mplot3d import Axes3D
 
 def parse_output_file(filename, grid_size=(20, 20, 20)):
     nx, ny, nz = grid_size
-    iterations = {}
+    grid_states = []
+    current_grid = np.zeros((nx, ny, nz), dtype=int)
+    sorted_iterations = []
 
     try:
         with open(filename, "r") as f:
-            current_iteration = None
-
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                if "Iteration:" in line:
-                    parts = line.split(":")
-                    if len(parts) >= 2:
-                        try:
-                            current_iteration = int(parts[1].strip())
-                            if current_iteration not in iterations:
-                                iterations[current_iteration] = {}
-                        except ValueError:
-                            continue
-                else:
-                    if current_iteration is not None:
-                        try:
-                            parts = line.split()
-                            if len(parts) >= 4:
-                                i = int(parts[0]) - 1  # Convert to 0-indexed
-                                j = int(parts[1]) - 1
-                                k = int(parts[2]) - 1
-                                value = int(parts[3])
 
-                                iterations[current_iteration][(i, j, k)] = value
-                        except (ValueError, IndexError):
-                            continue
+                if line.startswith("#INIT"):
+                    # Start of initial state
+                    current_grid = np.zeros((nx, ny, nz), dtype=int)
+                elif line.startswith("#D"):
+                    # Start of diff section - save current grid and start new iteration
+                    grid_states.append(current_grid.copy())
+                    try:
+                        iteration = int(line[2:])
+                        sorted_iterations.append(iteration)
+                    except ValueError:
+                        pass
+                else:
+                    # Parse data: i,j,k,value
+                    try:
+                        parts = line.split(",")
+                        if len(parts) >= 4:
+                            i = int(parts[0]) - 1  # Convert to 0-indexed
+                            j = int(parts[1]) - 1
+                            k = int(parts[2]) - 1
+                            value = int(parts[3])
+
+                            if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
+                                current_grid[i, j, k] = value
+                    except (ValueError, IndexError):
+                        continue
+
+            # Add the final grid state
+            if len(grid_states) == 0 or not np.array_equal(grid_states[-1], current_grid):
+                grid_states.append(current_grid.copy())
+
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
         sys.exit(1)
-
-    grid_states = []
-    sorted_iterations = sorted(iterations.keys())
-
-    for iteration in sorted_iterations:
-        grid = np.zeros((nx, ny, nz), dtype=int)
-        for (i, j, k), value in iterations[iteration].items():
-            if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                grid[i, j, k] = value
-        grid_states.append(grid)
 
     return grid_states, sorted_iterations
 
@@ -158,8 +157,8 @@ def main():
     parser.add_argument(
         "--input",
         "-i",
-        default="output.txt",
-        help="Input txt file from Fortran simulation (default: output.txt)",
+        default="output.csv",
+        help="Input txt file from Fortran simulation (default: output.csv)",
     )
     parser.add_argument(
         "--output",
