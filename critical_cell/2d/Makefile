@@ -1,5 +1,6 @@
 FC = gfortran
-FFLAGS = -Wall -Wextra -O2 -pedantic
+FFLAGS = -Wall -Wextra -O2 -pedantic -fopenmp
+THREADS ?= 1
 
 OBJECTS = grid_module.o main.o
 EXECUTABLE = critical_cell
@@ -25,8 +26,8 @@ clean:
 	rm -f *.o *.mod $(EXECUTABLE)
 
 run: $(EXECUTABLE)
-	@echo "Running execution timer..."
-	@time ./$(EXECUTABLE)
+	@echo "Running execution timer with $(THREADS) threads..."
+	@OMP_NUM_THREADS=$(THREADS) time ./$(EXECUTABLE)
 
 rebuild: clean all
 

@@ -14,7 +14,7 @@ program critical_cellular_automaton
 
     nx = 2000
     ny = 2000
-    max_iterations = 1000
+    max_iterations = 10000
     init_type = 'random'
     output_file = 'output.csv'
 
@@ -41,9 +41,7 @@ program critical_cellular_automaton
         grid%iteration = iteration
         call write_grid_diff(grid, output_unit)
 
-        do while (check_critical(grid))
-            call redistribute_cells(grid, output_unit)
-        end do
+        call redistribute_cells(grid, output_unit)
 
         if (mod(iteration, max_iterations/20) == 0) then
             print *, 'Iteration: ', iteration, ' Total grains: ', get_sum(grid)

@@ -53,28 +53,59 @@ contains
     subroutine redistribute_cells(grid, unit)
         type(grid_type), intent(inout) :: grid
         integer, intent(in) :: unit
+        integer, allocatable :: temp_cells(:,:)
         integer :: i, j
         logical :: redistributed
 
         grid%iteration = grid%iteration + 1
+        allocate(temp_cells(grid%nx, grid%ny))
 
         do while (.true.)
             redistributed = .false.
+
+            ! Phase 1: Process even cells (i+j is even) - no atomic contention
+            temp_cells = grid%cells
+            !$omp parallel do collapse(2) reduction(.or.:redistributed)
             do i = 1, grid%nx
                 do j = 1, grid%ny
-                    if (grid%cells(i,j) >= 4) then
-                        grid%cells(i,j) = grid%cells(i,j) - 4
-                        if (i > 1) grid%cells(i-1,j) = grid%cells(i-1,j) + 1
-                        if (i < grid%nx) grid%cells(i+1,j) = grid%cells(i+1,j) + 1
-                        if (j > 1) grid%cells(i,j-1) = grid%cells(i,j-1) + 1
-                        if (j < grid%ny) grid%cells(i,j+1) = grid%cells(i,j+1) + 1
+                    if (mod(i+j, 2) == 0 .and. temp_cells(i,j) >= 4) then
+                        temp_cells(i,j) = temp_cells(i,j) - 4
+
+                        if (i > 1) temp_cells(i-1,j) = temp_cells(i-1,j) + 1
+                        if (i < grid%nx) temp_cells(i+1,j) = temp_cells(i+1,j) + 1
+                        if (j > 1) temp_cells(i,j-1) = temp_cells(i,j-1) + 1
+                        if (j < grid%ny) temp_cells(i,j+1) = temp_cells(i,j+1) + 1
                         redistributed = .true.
                     end if
                 end do
             end do
+            !$omp end parallel do
+            grid%cells = temp_cells
+
+            ! Phase 2: Process odd cells (i+j is odd) - no atomic contention
+            temp_cells = grid%cells
+            !$omp parallel do collapse(2) reduction(.or.:redistributed)
+            do i = 1, grid%nx
+                do j = 1, grid%ny
+                    if (mod(i+j, 2) == 1 .and. temp_cells(i,j) >= 4) then
+                        temp_cells(i,j) = temp_cells(i,j) - 4
+
+                        if (i > 1) temp_cells(i-1,j) = temp_cells(i-1,j) + 1
+                        if (i < grid%nx) temp_cells(i+1,j) = temp_cells(i+1,j) + 1
+                        if (j > 1) temp_cells(i,j-1) = temp_cells(i,j-1) + 1
+                        if (j < grid%ny) temp_cells(i,j+1) = temp_cells(i,j+1) + 1
+                        redistributed = .true.
+                    end if
+                end do
+            end do
+            !$omp end parallel do
+            grid%cells = temp_cells
+
             call write_grid_diff(grid, unit)
             if (.not. redistributed) exit
         end do
+
+        deallocate(temp_cells)
 
     end subroutine redistribute_cells
 
@@ -85,14 +116,15 @@ contains
         integer :: i, j
 
         has_critical = .false.
+        !$omp parallel do collapse(2) reduction(.or.:has_critical)
         do i = 1, grid%nx
             do j = 1, grid%ny
                 if (grid%cells(i,j) >= 4) then
                     has_critical = .true.
-                    return
                 end if
             end do
         end do
+        !$omp end parallel do
     end function check_critical
 
 
@@ -115,11 +147,13 @@ contains
         integer :: i, j
 
         total = 0
+        !$omp parallel do collapse(2) reduction(+:total)
         do i = 1, grid%nx
             do j = 1, grid%ny
                 total = total + grid%cells(i,j)
             end do
         end do
+        !$omp end parallel do
 
     end function get_sum
 
@@ -166,28 +200,18 @@ contains
 
         has_diff = .false.
 
-        ! Check if there are any differences
+        ! Single pass: write diffs as we find them, header written on first diff
         do i = 1, grid%nx
             do j = 1, grid%ny
                 if (grid%cells(i,j) /= grid%prev_cells(i,j)) then
-                    has_diff = .true.
-                    exit
+                    if (.not. has_diff) then
+                        write(unit,'(A,I0)') '#D', grid%iteration
+                        has_diff = .true.
+                    end if
+                    write(unit,'(I0,A,I0,A,I0)') i, ',', j, ',', grid%cells(i,j)
                 end if
             end do
-            if (has_diff) exit
         end do
-
-        ! Write header only if there are differences
-        if (has_diff) then
-            write(unit,'(A,I0)') '#D', grid%iteration
-            do i = 1, grid%nx
-                do j = 1, grid%ny
-                    if (grid%cells(i,j) /= grid%prev_cells(i,j)) then
-                        write(unit,'(I0,A,I0,A,I0)') i, ',', j, ',', grid%cells(i,j)
-                    end if
-                end do
-            end do
-        end if
 
         ! Update previous state
         grid%prev_cells = grid%cells

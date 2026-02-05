@@ -25,10 +25,14 @@ For the 2D case it does the same but the criticality point is 4.
 
 ```base
 make rebuild
-make run
+make THREADS=N run
 ```
 
 Needs a fortran compiler and make installed.
+
+I use gfortran.
+
+Threads defaults to 1, but can be set to the number of cores on your machine for faster performance.
 
 ## Python Visualization
 
