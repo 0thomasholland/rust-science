@@ -22,3 +22,4 @@ target
 
 # Ignore any subdictories within output directory
 **/output/**/
+.DS_Store

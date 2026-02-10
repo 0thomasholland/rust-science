@@ -1,8 +1,12 @@
 *
-!grid_module.f90
-!main.f90
-!Makefile
-!README.md
+!*/
+
+!**/grid_module.f90
+!**/main.f90
+!**/Makefile
+!**/README.md
+!**/visualise.py
+
 !LICENSE.txt
-!visualise.py
 !.gitignore
+!output_animation.mp4
